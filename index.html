@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<meta http-equiv="content-type" content="text/html;charset=UTF-8" />
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>ByleeosAI - Dark Asisten AI</title>
+  <script src="https://cdn.tailwindcss.com/"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;family=Creepster&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            horror: ['Creepster', 'cursive'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            blood: {
+              50: '#fff1f2',
+              100: '#ffe4e6',
+              200: '#fecdd3',
+              300: '#fda4af',
+              400: '#fb7185',
+              500: '#f43f5e',
+              600: '#e11d48',
+              700: '#be123c',
+              800: '#9f1239',
+              900: '#881337',
+              950: '#4c0519',
+            },
+            void: '#050505',
+            panel: '#0a0a0a',
+          },
+          animation: {
+            'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'float': 'float 6s ease-in-out infinite',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* === GLOBAL & UTILS === */
+    body {
+      background-color: #000;
+      background-image: 
+        radial-gradient(circle at 50% 0%, #1f050a 0%, transparent 70%),
+        radial-gradient(circle at 0% 100%, #1a0303 0%, transparent 50%);
+      color: #e5e5e5;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Scrollbar Halus */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #331111; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #661111; }
+
+    /* Keyframes */
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* === COMPONENTS === */
+    .glass-panel {
+      background: rgba(10, 10, 10, 0.7);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .message-enter { animation: slideIn 0.3s ease-out forwards; }
+
+    /* Code Block Styling */
+    .code-preview-frame { width: 100%; height: 300px; background: white; border: none; border-radius: 0 0 8px 8px; }
+    
+    /* Mobile Sidebar Transition */
+    .sidebar-transition { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    
+    /* Typing Dots */
+    .typing-dot {
+      width: 4px; height: 4px; background: #ef4444; border-radius: 50%;
+      animation: typing 1.4s infinite ease-in-out both;
+    }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+  </style>
+</head>
+<body class="h-[100dvh] w-full overflow-hidden flex text-sm antialiased selection:bg-blood-900 selection:text-white">
+
+  <div id="sidebar-overlay" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-40 hidden transition-opacity opacity-0" onclick="toggleSidebar()"></div>
+
+  <aside id="sidebar" class="fixed md:relative z-50 w-[280px] h-full bg-void border-r border-white/5 flex flex-col transform -translate-x-full md:translate-x-0 sidebar-transition shadow-2xl md:shadow-none">
+    
+    <div class="h-16 flex items-center px-4 border-b border-white/5 bg-black/20">
+      <div class="flex items-center gap-3 w-full">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blood-900 to-black flex items-center justify-center shadow-[0_0_15px_rgba(220,38,38,0.3)]">
+          <i class="fas fa-robot text-blood-200 text-xs"></i>
+        </div>
+        <div class="flex flex-col">
+          <h1 class="font-horror text-xl tracking-widest text-blood-500 leading-none">Byleeos AI</h1>
+          <span class="text-[9px] font-bold text-gray-500 tracking-[0.2em] uppercase">WorM Edition</span>
+        </div>
+        <button onclick="toggleSidebar()" class="ml-auto md:hidden text-gray-500 hover:text-white p-2">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+    </div>
+
+    <div class="p-4">
+      <button id="new-chat-btn" class="w-full py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blood-900/50 rounded-xl flex items-center gap-3 transition-all group text-gray-300 hover:text-white">
+        <div class="w-6 h-6 rounded-md bg-blood-900/20 flex items-center justify-center group-hover:bg-blood-600 transition-colors">
+          <i class="fas fa-plus text-xs"></i>
+        </div>
+        <span class="font-semibold text-xs">Chat Baru</span>
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-1" id="history-list">
+      </div>
+
+    <div class="p-4 border-t border-white/5 bg-black/20">
+      <div class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
+        <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-blood-950 to-blood-900 border border-blood-800 flex items-center justify-center">
+          <i class="fas fa-user-astronaut text-xs text-blood-200"></i>
+        </div>
+        <div class="flex flex-col overflow-hidden">
+          <span class="font-bold text-xs text-gray-200 truncate">Pengguna</span>
+          <span class="text-[10px] text-blood-500 truncate">Pengguna Terkutuk</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="flex-1 flex flex-col h-full relative min-w-0 bg-void/50">
+    
+    <header class="h-16 flex-shrink-0 glass-panel border-b-0 border-white/5 flex items-center justify-between px-4 z-30">
+      <div class="flex items-center gap-3 min-w-0">
+        <button onclick="toggleSidebar()" class="md:hidden w-9 h-9 flex items-center justify-center rounded-lg bg-white/5 text-gray-400 active:bg-white/10">
+          <i class="fas fa-bars"></i>
+        </button>
+        
+        <div class="flex flex-col min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold text-gray-200 truncate max-w-[150px] md:max-w-xs" id="current-chat-title">Chat Baru</span>
+            <span class="px-1.5 py-0.5 rounded text-[9px] bg-blood-900/30 text-blood-400 border border-blood-900/50">Beta Version</span>
+          </div>
+          <select id="model-select" class="bg-transparent text-[10px] text-gray-500 focus:outline-none cursor-pointer hover:text-gray-300 transition-colors max-w-[200px]">
+            <option value="moonshotai/Kimi-K2-Instruct" class="bg-gray-900 text-gray-300">🚀Byleeos Worm AI</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="delete-chat-btn" class="w-8 h-8 rounded-lg hover:bg-blood-900/20 hover:text-blood-500 text-gray-600 transition-all flex items-center justify-center" title="Hapus">
+        <i class="fas fa-trash-alt text-xs"></i>
+      </button>
+    </header>
+
+    <div id="chat-container" class="flex-1 overflow-y-auto px-4 md:px-0 scroll-smooth">
+      <div id="chat" class="max-w-3xl mx-auto py-6 space-y-6 md:space-y-8 min-h-full flex flex-col justify-start">
+        <div class="flex-1 flex flex-col items-center justify-center text-center opacity-100 transition-opacity duration-500" id="welcome-screen">
+          <div class="w-20 h-20 mb-6 rounded-2xl bg-gradient-to-b from-blood-900/20 to-black border border-blood-900/30 flex items-center justify-center animate-float shadow-[0_0_30px_rgba(185,28,28,0.1)]">
+            <i class="fas fa-robot text-3xl text-blood-600 drop-shadow-[0_0_10px_rgba(220,38,38,0.5)]"></i>
+          </div>
+          <h2 class="text-2xl md:text-3xl font-bold text-gray-200 mb-2">Selamat Datang <span class="text-blood-500 font-horror tracking-wide"> di Neraka Primrose</span></h2>
+          <p class="text-gray-500 text-xs md:text-sm max-w-md mb-8 leading-relaxed">
+            Tuliskan mantramu. Kode, esai, atau kutukan kuno. Aku siap melayani dalam kegelapan.
+          </p>
+          
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-lg px-4">
+            <button class="p-3 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 hover:border-blood-900/30 transition-all text-left group" onclick="fillInput('Buatkan code html+css+js horror digabung dalam 1 file')">
+              <div class="flex items-center gap-2 mb-1">
+                <i class="fas fa-code text-blood-500 text-xs"></i>
+                <span class="font-semibold text-gray-300 text-xs">Coding</span>
+              </div>
+              <div class="text-[10px] text-gray-500 group-hover:text-gray-400">"Buatkan code html+css+js horror digabung dalam 1 file"</div>
+            </button>
+            <button class="p-3 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 hover:border-blood-900/30 transition-all text-left group" onclick="fillInput('Kisah hantu di sekolah terbengkalai bandung')">
+              <div class="flex items-center gap-2 mb-1">
+                <i class="fas fa-ghost text-blood-500 text-xs"></i>
+                <span class="font-semibold text-gray-300 text-xs">Story</span>
+              </div>  
+              <div class="text-[10px] text-gray-500 group-hover:text-gray-400">"Kisah hantu di sekolah terbengkalai bandung"</div>
+            </button>
+          </div>
+        </div>
+        </div>
+    </div>
+
+    <div class="flex-shrink-0 p-4 md:p-6 z-20 w-full max-w-3xl mx-auto">
+      <div class="glass-panel rounded-2xl p-2 md:p-3 relative shadow-2xl">
+        <form id="chat-form" class="flex items-end gap-2">
+          <div class="flex-1 relative">
+            <textarea 
+              id="message-input" 
+              rows="1" 
+              placeholder="Write something..." 
+              class="w-full bg-transparent text-gray-200 placeholder-gray-600 text-sm px-3 py-3 focus:outline-none resize-none max-h-32 scrollbar-none font-medium leading-relaxed"
+              oninput="this.style.height = ''; this.style.height = Math.min(this.scrollHeight, 128) + 'px'"
+            ></textarea>
+          </div>
+          <button 
+            type="submit" 
+            id="send-btn" 
+            class="w-10 h-10 md:w-11 md:h-11 rounded-xl bg-gradient-to-br from-blood-600 to-blood-800 text-white shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+          >
+            <i class="fas fa-paper-plane text-xs md:text-sm"></i>
+          </button>
+        </form>
+        <div class="absolute -top-6 left-0 text-[9px] text-gray-600 px-2 hidden md:block">
+          Tekan <span class="font-bold text-gray-500">Shift + Enter</span> untuk baris baru
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // === 1. SYSTEM UTILITIES ===
+    const escapeHtml = (text) => {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    };
+
+    function fillInput(text) {
+      const input = document.getElementById('message-input');
+      input.value = text;
+      input.focus();
+      // Trigger auto resize
+      input.style.height = 'auto';
+      input.style.height = input.scrollHeight + 'px';
+    }
+
+    // === 2. UI LOGIC (MOBILE SIDEBAR) ===
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+
+    function toggleSidebar() {
+      const isClosed = sidebar.classList.contains('-translate-x-full');
+      if (isClosed) {
+        sidebar.classList.remove('-translate-x-full');
+        overlay.classList.remove('hidden');
+        // Small delay to allow display:block to render before opacity transition
+        setTimeout(() => overlay.classList.remove('opacity-0'), 10);
+      } else {
+        sidebar.classList.add('-translate-x-full');
+        overlay.classList.add('opacity-0');
+        setTimeout(() => overlay.classList.add('hidden'), 300);
+      }
+    }
+
+    // Auto close sidebar on mobile when item clicked
+    function checkMobileClose() {
+      if (window.innerWidth < 768) toggleSidebar();
+    }
+
+    // === 3. CODE BLOCK PARSER (VS Code Style) ===
+    function detectCodeBlocks(text) {
+      const blocks = [];
+      // Code block regex
+      const markdownRegex = /```(\w*)\s*\n([\s\S]*?)\n```/g;
+      let match;
+      while ((match = markdownRegex.exec(text)) !== null) {
+        blocks.push({
+          start: match.index,
+          end: match.index + match[0].length,
+          language: match[1] || 'plaintext',
+          code: match[2],
+          type: 'markdown'
+        });
+      }
+      
+      // HTML Auto Detection
+      const htmlFullRegex = /(<!DOCTYPE[\s\S]*?<\/html>|<html[\s\S]*?<\/html>)/gi;
+      while ((match = htmlFullRegex.exec(text)) !== null) {
+        const overlaps = blocks.some(b => 
+          (match.index >= b.start && match.index < b.end)
+        );
+        if (!overlaps) {
+          blocks.push({
+            start: match.index,
+            end: match.index + match[0].length,
+            language: 'html',
+            code: match[0],
+            type: 'auto'
+          });
+        }
+      }
+      return blocks.sort((a, b) => a.start - b.start);
+    }
+
+    function createCodeBlock(code, language) {
+      const safeCode = escapeHtml(code.trim());
+      const blockId = 'code-' + Math.random().toString(36).substr(2, 9);
+      const canPreview = language.toLowerCase() === 'html';
+      const rawForAttr = code.trim().replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+      return `
+        <div class="my-4 rounded-lg overflow-hidden border border-white/10 bg-[#1e1e1e] shadow-lg" data-block-id="${blockId}">
+          <div class="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-white/5">
+            <div class="flex items-center gap-3">
+              <div class="flex gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-red-500/50"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-yellow-500/50"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-green-500/50"></div>
+              </div>
+              <span class="text-[10px] font-mono text-gray-400 uppercase font-bold ml-2">${language}</span>
+            </div>
+            <div class="flex gap-2">
+              ${canPreview ? `<button class="text-xs text-gray-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-white/10 preview-btn" data-block="${blockId}"><i class="fas fa-play mr-1"></i> Preview</button>` : ''}
+              <button class="text-xs text-gray-400 hover:text-white transition-colors px-2 py-1 rounded hover:bg-white/10 copy-btn" data-code="${rawForAttr}"><i class="fas fa-copy mr-1"></i> Copy</button>
+            </div>
+          </div>
+          <div class="relative group code-content-wrapper" data-view="code">
+            <pre class="p-4 overflow-x-auto text-xs md:text-sm font-mono leading-relaxed text-gray-300 scrollbar-none"><code>${safeCode}</code></pre>
+          </div>
+          ${canPreview ? `<div class="hidden bg-white" data-view="preview"><iframe class="code-preview-frame" sandbox="allow-scripts allow-same-origin"></iframe></div>` : ''}
+        </div>
+      `;
+    }
+
+    function formatAIResponse(text) {
+      const codeBlocks = detectCodeBlocks(text);
+      if (codeBlocks.length === 0) {
+        return `<div class="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed space-y-3">${text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong class="text-blood-400 font-semibold">$1</strong>')}</div>`;
+      }
+
+      let result = '';
+      let lastIndex = 0;
+      
+      codeBlocks.forEach(block => {
+        const textBefore = text.substring(lastIndex, block.start).trim();
+        if (textBefore) {
+          result += `<div class="prose prose-invert prose-sm max-w-none text-gray-300 mb-2">${textBefore.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong class="text-blood-400 font-semibold">$1</strong>')}</div>`;
+        }
+        result += createCodeBlock(block.code, block.language);
+        lastIndex = block.end;
+      });
+      
+      const textAfter = text.substring(lastIndex).trim();
+      if (textAfter) {
+        result += `<div class="prose prose-invert prose-sm max-w-none text-gray-300 mt-2">${textAfter.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong class="text-blood-400 font-semibold">$1</strong>')}</div>`;
+      }
+      return result;
+    }
+
+    function attachCodeListeners() {
+      document.querySelectorAll('.copy-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          const code = btn.getAttribute('data-code');
+          navigator.clipboard.writeText(code);
+          const icon = btn.querySelector('i');
+          icon.className = 'fas fa-check text-green-500';
+          setTimeout(() => icon.className = 'fas fa-copy', 2000);
+        };
+      });
+
+      document.querySelectorAll('.preview-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          const blockId = btn.getAttribute('data-block');
+          const block = document.querySelector(`[data-block-id="${blockId}"]`);
+          const codeView = block.querySelector('[data-view="code"]');
+          const previewView = block.querySelector('[data-view="preview"]');
+          const iframe = previewView.querySelector('iframe');
+          const copyBtn = block.querySelector('.copy-btn');
+
+          if (codeView.classList.contains('hidden')) {
+            codeView.classList.remove('hidden');
+            previewView.classList.add('hidden');
+            btn.innerHTML = '<i class="fas fa-play mr-1"></i> Preview';
+          } else {
+            const code = copyBtn.getAttribute('data-code');
+            iframe.srcdoc = code;
+            codeView.classList.add('hidden');
+            previewView.classList.remove('hidden');
+            btn.innerHTML = '<i class="fas fa-code mr-1"></i> Code';
+          }
+        };
+      });
+    }
+
+    // === 4. CHAT LOGIC ===
+    let allChats = JSON.parse(localStorage.getItem('ByleeosAIChats') || '[]');
+    let currentChatId = localStorage.getItem('ByleeosAICurrentId');
+
+    function saveState() {
+      localStorage.setItem('ByleeosAIChats', JSON.stringify(allChats));
+      localStorage.setItem('ByleeosAICurrentId', currentChatId);
+    }
+
+    function createNewChat() {
+      const id = 'chat-' + Date.now();
+      allChats.unshift({ id, title: 'Chat Baru', messages: [], date: new Date().toISOString() });
+      currentChatId = id;
+      saveState();
+      renderHistory();
+      renderChat();
+      checkMobileClose();
+    }
+
+    function deleteCurrentChat() {
+      if (!confirm('Apakah Anda Yakin Ingin Menghapus Chat ini?')) return;
+      allChats = allChats.filter(c => c.id !== currentChatId);
+      if (allChats.length > 0) currentChatId = allChats[0].id;
+      else createNewChat();
+      saveState();
+      renderHistory();
+      renderChat();
+    }
+
+    function renderHistory() {
+      const list = document.getElementById('history-list');
+      list.innerHTML = '';
+      allChats.forEach(chat => {
+        const isActive = chat.id === currentChatId;
+        const el = document.createElement('div');
+        el.className = `p-3 rounded-lg cursor-pointer transition-all text-xs mb-1 flex flex-col gap-1 ${isActive ? 'bg-white/10 border border-blood-900/50 text-white' : 'text-gray-400 hover:bg-white/5 hover:text-gray-200'}`;
+        el.innerHTML = `
+          <div class="font-semibold truncate">${chat.title}</div>
+          <div class="flex items-center gap-2 text-[10px] opacity-60">
+            <i class="fas fa-clock text-[9px]"></i> ${new Date(chat.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+          </div>
+        `;
+        el.onclick = () => {
+          currentChatId = chat.id;
+          saveState();
+          renderHistory();
+          renderChat();
+          checkMobileClose();
+        };
+        list.appendChild(el);
+      });
+    }
+
+    function renderChat() {
+      const chat = allChats.find(c => c.id === currentChatId);
+      const chatBox = document.getElementById('chat');
+      const welcome = document.getElementById('welcome-screen');
+      const titleEl = document.getElementById('current-chat-title');
+      
+      // Clear existing messages (keep welcome screen div)
+      Array.from(chatBox.children).forEach(child => {
+        if (child.id !== 'welcome-screen') child.remove();
+      });
+
+      if (!chat || chat.messages.length === 0) {
+        welcome.style.display = 'flex';
+        titleEl.textContent = 'Chat Baru';
+        return;
+      }
+
+      welcome.style.display = 'none';
+      titleEl.textContent = chat.title;
+
+      chat.messages.forEach(msg => appendMessageToDOM(msg));
+      attachCodeListeners();
+      scrollToBottom();
+    }
+
+    function appendMessageToDOM(msg, animate = false) {
+      const chatBox = document.getElementById('chat');
+      const div = document.createElement('div');
+      div.className = `flex gap-3 md:gap-4 max-w-full ${animate ? 'message-enter' : ''}`;
+      
+      const isUser = msg.role === 'user';
+      
+      div.innerHTML = `
+        ${!isUser ? `
+        <div class="flex-shrink-0 w-8 h-8 md:w-9 md:h-9 rounded-lg bg-black border border-gray-800 flex items-center justify-center mt-1 shadow-md">
+          <i class="fas fa-robot text-blood-600 text-sm"></i>
+        </div>` : ''}
+        
+        <div class="${isUser ? 'ml-auto max-w-[85%] md:max-w-[75%]' : 'flex-1 min-w-0'}">
+          <div class="${isUser 
+            ? 'bg-blood-900 text-white px-4 py-2.5 rounded-2xl rounded-tr-sm shadow-md text-sm leading-relaxed border border-blood-700' 
+            : 'text-gray-300 text-sm leading-relaxed pt-1'}">
+            ${isUser ? escapeHtml(msg.content).replace(/\n/g, '<br>') : formatAIResponse(msg.content)}
+          </div>
+        </div>
+
+        ${isUser ? `
+        <div class="flex-shrink-0 w-8 h-8 md:w-9 md:h-9 rounded-lg bg-white/10 flex items-center justify-center mt-1">
+          <i class="fas fa-user text-gray-300 text-xs"></i>
+        </div>` : ''}
+      `;
+      chatBox.appendChild(div);
+    }
+
+    function scrollToBottom() {
+      const container = document.getElementById('chat-container');
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
+
+    // === 5. MAIN EVENT HANDLERS ===
+    async function handleSend(e) {
+      e.preventDefault();
+      const input = document.getElementById('message-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const chat = allChats.find(c => c.id === currentChatId);
+      if (!chat) return;
+
+      // User Message
+      const userMsg = { role: 'user', content: text };
+      chat.messages.push(userMsg);
+      if (chat.title === 'Chat Baru') chat.title = text.substring(0, 20) + (text.length > 20 ? '...' : '');
+      
+      saveState();
+      renderHistory();
+      
+      // Hide welcome screen if first message
+      const welcome = document.getElementById('welcome-screen');
+      if(welcome.style.display !== 'none') welcome.style.display = 'none';
+      document.getElementById('current-chat-title').textContent = chat.title;
+
+      appendMessageToDOM(userMsg, true);
+      scrollToBottom();
+      
+      // Reset Input
+      input.value = '';
+      input.style.height = 'auto';
+      const btn = document.getElementById('send-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+      // AI Loading State
+      const loadingId = 'loading-' + Date.now();
+      const loadingHTML = `
+        <div id="${loadingId}" class="flex gap-3 md:gap-4 message-enter">
+          <div class="flex-shrink-0 w-8 h-8 rounded-lg bg-black border border-gray-800 flex items-center justify-center mt-1">
+            <i class="fas fa-robot text-blood-600 text-sm"></i>
+          </div>
+          <div class="flex items-center gap-1 h-9">
+            <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+          </div>
+        </div>
+      `;
+      document.getElementById('chat').insertAdjacentHTML('beforeend', loadingHTML);
+      scrollToBottom();
+
+      try {
+        // History Context Limiter
+        const limitedHistory = chat.messages.slice(-10); 
+
+       const res = await fetch('https://api.byleeos.my.id/api/worm', {
+        method: 'POST',
+        headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': 'primrose-001'
+        },
+        body: JSON.stringify({
+        message: text,
+        model: document.getElementById('model-select').value,
+        history: limitedHistory
+        })
+        });
+
+        document.getElementById(loadingId).remove();
+
+        if (!res.ok) throw new Error('Server Error');
+        const data = await res.json();
+        
+        const aiMsg = { role: 'assistant', content: data.reply || data.error || "Hampa..." };
+        chat.messages.push(aiMsg);
+        saveState();
+        appendMessageToDOM(aiMsg, true);
+        attachCodeListeners();
+
+      } catch (err) {
+        document.getElementById(loadingId)?.remove();
+        const errorMsg = { role: 'assistant', content: "☠️ Koneksi ke dunia bawah terputus: " + err.message };
+        chat.messages.push(errorMsg);
+        saveState();
+        appendMessageToDOM(errorMsg, true);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-paper-plane"></i>';
+        scrollToBottom();
+      }
+    }
+
+    // === INIT ===
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('new-chat-btn').onclick = createNewChat;
+      document.getElementById('delete-chat-btn').onclick = deleteCurrentChat;
+      document.getElementById('chat-form').onsubmit = handleSend;
+      
+      // Enter to send (Shift+Enter for new line)
+      document.getElementById('message-input').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (!this.value.trim()) return;
+          handleSend(e);
+        }
+      });
+
+      if (!currentChatId || !allChats.find(c => c.id === currentChatId)) createNewChat();
+      else {
+        renderHistory();
+        renderChat();
+      }
+    });
+
+  </script>
+</body>
+</html>
