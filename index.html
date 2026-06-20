@@ -133,87 +133,54 @@
 
     <!-- ========== ADMIN SECTION ========== -->
     <section id="view-admin" class="hidden space-y-6">
-      <!-- Panel Utama Admin -->
-      <div class="glass p-7 rounded-[2.5rem]">
+      
+      <!-- PANEL 1: OVERVIEW (Halaman awal admin) -->
+      <div id="admin-panel-overview" data-admin-panel="1" class="glass p-7 rounded-[2.5rem]">
         <h2 class="text-sm font-black mb-2 text-white uppercase tracking-widest italic">ADMIN (Kepala Sekolah)</h2>
         <p class="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-4">
           Kelola seluruh data presensi sekolah
         </p>
 
+        <div id="admin-overview-cards" class="space-y-4">
+          <!-- Cards overview akan di-render oleh JS -->
+        </div>
+        
+        <div class="glass p-5 rounded-[2rem] mt-6">
+          <div class="text-xs font-black uppercase tracking-widest text-cyan-300">Panel Admin Dirapikan</div>
+          <p class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-3">Tab atas sekarang dipisah: akun, siswa, jadwal, dan pengaturan. Tab Piket tetap dipakai untuk scan QR, manual presensi, dispen, dan pulang cepat.</p>
+        </div>
+      </div>
 
-        <div class="glass p-6 rounded-[2rem] mb-6">
+      <!-- PANEL 2: AKUN GURU -->
+      <div id="admin-panel-accounts" data-admin-panel="1" class="space-y-6 hidden">
+        <div class="glass p-7 rounded-[2.5rem]">
           <div class="flex items-center justify-between gap-4 mb-4">
             <div>
-              <h3 class="text-xs font-black uppercase tracking-widest text-cyan-300" id="acc-form-title">Buat Akun Baru</h3>
-              <p class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-2">Kelola akun admin, guru, orang tua, dan data siswa dari satu area. Untuk guru bisa isi NIP, kelas ajar, dan wali kelas.</p>
+              <h3 class="text-xs font-black uppercase tracking-widest text-cyan-300" id="acc-form-title">Buat Akun Guru / Orang Tua</h3>
+              <p class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-2">Kelola akun guru, admin, dan orang tua. Data siswa dipisah ke tab Siswa.</p>
             </div>
           </div>
 
           <input type="hidden" id="acc-edit-index" value="" />
 
           <div class="grid md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Nama Pengguna</label>
-              <input id="acc-name" type="text" placeholder="Contoh: Bu Rina" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-            </div>
-            <div>
-              <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Username</label>
-              <input id="acc-username" type="text" placeholder="Contoh: rina.wali" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-            </div>
-            <div>
-              <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Password</label>
-              <input id="acc-password" type="text" placeholder="Buat password akun" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-            </div>
-            <div>
-              <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Role</label>
-              <select id="acc-role" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1">
-                <option value="admin">ADMIN</option>
-                <option value="guru">GURU</option>
-                <option value="orangtua">ORANG TUA</option>
-                
-              </select>
-            </div>
-            <div id="acc-siswa-wrap" class="hidden md:col-span-2">
-              <div class="grid md:grid-cols-2 gap-4">
-                <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">NIK</label><input id="acc-siswa-nik" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="NIK"/></div>
-                <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">NISN</label><input id="acc-siswa-nisn" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="NISN"/></div>
-                <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">NIS</label><input id="acc-siswa-nis" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="NIS"/></div>
-                <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Nama Siswa</label><input id="acc-siswa-nama" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="Nama lengkap siswa"/></div>
-                <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Kelas</label><select id="acc-siswa-kelas" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"></select></div>
-                <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Jenis</label><select id="acc-siswa-jenis" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"><option value="L">Laki-laki</option><option value="P">Perempuan</option></select></div>
-                <div class="md:col-span-2"><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Agama</label><input id="acc-siswa-agama" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="Islam" value="Islam"/></div>
-              </div>
-            </div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Nama Pengguna</label><input id="acc-name" type="text" placeholder="Contoh: Bu Rina" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Username</label><input id="acc-username" type="text" placeholder="Contoh: rina.wali" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Password</label><input id="acc-password" type="text" placeholder="Buat password akun" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Role</label><select id="acc-role" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"><option value="admin">ADMIN</option><option value="guru">GURU</option><option value="orangtua">ORANG TUA</option></select></div>
             <div id="acc-guru-extra-wrap" class="hidden md:col-span-2">
               <div class="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">NIP</label>
-                  <input id="acc-guru-nip" type="text" placeholder="NIP Guru" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-                </div>
-                <div>
-                  <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Ngajar di Kelas</label>
-                  <input id="acc-guru-mengajar" type="text" placeholder="Contoh: X-1, X-2, XI-3" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-                </div>
+                <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">NIP</label><input id="acc-guru-nip" type="text" placeholder="NIP Guru" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
+                <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Ngajar di Kelas</label><input id="acc-guru-mengajar" type="text" placeholder="Contoh: X-1, X-2, XI-3" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
               </div>
             </div>
             <div id="acc-guru-wrap" class="hidden md:col-span-2">
-              <label class="flex items-center gap-3 text-[10px] uppercase tracking-widest font-bold text-gray-300 mb-2">
-                <input id="acc-is-wali" type="checkbox" class="accent-cyan-500 w-4 h-4"/> Jadikan wali kelas
-              </label>
+              <label class="flex items-center gap-3 text-[10px] uppercase tracking-widest font-bold text-gray-300 mb-2"><input id="acc-is-wali" type="checkbox" class="accent-cyan-500 w-4 h-4"/> Jadikan wali kelas</label>
               <input id="acc-wali-kelas" type="text" placeholder="Kelas wali, contoh: X-1" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
             </div>
-            <div id="acc-kelas-wrap" class="hidden">
-              <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Kelas Anak</label>
-              <select id="acc-kelas" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"></select>
-            </div>
-            <div id="acc-absen-wrap" class="hidden">
-              <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">No Absen Siswa</label>
-              <input id="acc-absen" type="text" placeholder="Contoh: 07" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-            </div>
-            <div id="acc-hp-wrap" class="hidden md:col-span-2">
-              <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">No HP Orang Tua</label>
-              <input id="acc-hp" type="text" placeholder="Opsional, untuk pencocokan notif" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-            </div>
+            <div id="acc-kelas-wrap" class="hidden"><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Kelas Anak</label><select id="acc-kelas" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"></select></div>
+            <div id="acc-absen-wrap" class="hidden"><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">No Absen Siswa</label><input id="acc-absen" type="text" placeholder="Contoh: 07" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
+            <div id="acc-hp-wrap" class="hidden md:col-span-2"><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">No HP Orang Tua</label><input id="acc-hp" type="text" placeholder="Opsional, untuk pencocokan notif" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
           </div>
 
           <div class="flex flex-wrap gap-3">
@@ -222,14 +189,56 @@
           </div>
           <div class="flex flex-wrap gap-3 mt-3">
             <button id="btn-download-guru-data" class="px-5 py-3 bg-emerald-700 hover:bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Download Data Guru</button>
-            <button id="btn-export-student-excel" class="px-5 py-3 bg-violet-700 hover:bg-violet-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Export Excel Siswa</button>
           </div>
 
           <div id="account-list" class="space-y-3 mt-5"></div>
-          <div id="admin-student-list" class="space-y-3 mt-5"></div>
+        </div>
+      </div>
+
+      <!-- PANEL 3: DATA SISWA -->
+      <div id="admin-panel-students" data-admin-panel="1" class="space-y-6 hidden">
+        <div class="glass p-7 rounded-[2.5rem]">
+          <div class="flex items-center justify-between gap-4 mb-4">
+            <div>
+              <h3 id="student-form-title" class="text-xs font-black uppercase tracking-widest text-cyan-300">🧾 Data Siswa</h3>
+              <p class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-2">Tambah data satuan, edit data, dan lihat siswa per kelas. Nomor absen tetap dijaga stabil.</p>
+            </div>
+            <button id="btn-student-form-reset" class="px-4 py-3 border border-gray-700 text-gray-300 rounded-2xl text-[10px] font-black uppercase tracking-widest">Reset Form</button>
+          </div>
+          <input id="student-edit-nik" type="hidden"/>
+          <div class="grid md:grid-cols-2 gap-4 mb-4">
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">NIK</label><input id="student-nik" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="NIK"/></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">NISN</label><input id="student-nisn" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="NISN"/></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">NIS</label><input id="student-nis" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="NIS"/></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Nama Siswa</label><input id="student-nama" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="Nama lengkap siswa"/></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Kelas</label><select id="student-kelas" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"></select></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Jenis</label><select id="student-jenis" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"><option value="L">Laki-laki</option><option value="P">Perempuan</option></select></div>
+            <div class="md:col-span-2"><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Agama</label><input id="student-agama" type="text" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1" placeholder="Islam" value="Islam"/></div>
+          </div>
+          <div class="flex flex-wrap gap-3">
+            <button id="btn-student-save" class="px-5 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Simpan Data Siswa</button>
+            <button id="btn-student-preview-qr" class="px-5 py-3 bg-emerald-700 hover:bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Preview QR</button>
+            <button id="btn-student-export-qr-class" class="px-5 py-3 bg-yellow-700 hover:bg-yellow-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Download QR Kelas</button>
+            <button id="btn-student-export-excel" class="px-5 py-3 bg-violet-700 hover:bg-violet-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Export Excel per Kelas (ZIP)</button>
+          </div>
+          <div id="admin-student-qr-result" class="mt-4"></div>
         </div>
 
-        <div class="glass p-6 rounded-[2rem] mb-6">
+        <div class="glass p-7 rounded-[2.5rem]">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+            <div>
+              <h3 class="text-xs font-black uppercase tracking-widest text-emerald-300">📚 Daftar Siswa per Kelas</h3>
+              <p id="admin-student-summary" class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-2">-</p>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <select id="admin-student-class-picker" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white"></select>
+              <input id="admin-student-search" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Cari nama / NIK / NISN / NIS"/>
+            </div>
+          </div>
+          <div id="admin-student-list" class="space-y-3"></div>
+        </div>
+
+        <div class="glass p-7 rounded-[2.5rem]">
           <div class="flex items-center justify-between gap-4 mb-4">
             <div>
               <h3 class="text-xs font-black uppercase tracking-widest text-emerald-300">👨‍🎓 Bulk Data Siswa + QR ZIP</h3>
@@ -239,8 +248,7 @@
           <div class="grid lg:grid-cols-2 gap-5">
             <div>
               <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Paste Bulk Data</label>
-              <textarea id="admin-student-bulk" rows="8" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1 text-xs" placeholder="318918-324837-62326-gema-XI1-L-islam
-66276-234263-23423-asep-XI1-L-islam"></textarea>
+              <textarea id="admin-student-bulk" rows="8" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1 text-xs" placeholder="318918-324837-62326-gema-XI1-L-islam\n66276-234263-23423-asep-XI1-L-islam"></textarea>
               <div class="flex flex-wrap gap-3 mt-3">
                 <button id="btn-admin-student-bulk-import" class="px-5 py-3 bg-emerald-700 hover:bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Import Bulk + ZIP</button>
                 <button id="btn-admin-student-template" class="px-5 py-3 border border-gray-700 text-gray-300 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-900/70 transition-all">Download Template</button>
@@ -256,8 +264,11 @@
           </div>
           <div id="admin-student-import-log" class="mt-4 text-[10px] uppercase tracking-widest text-gray-400 font-bold"></div>
         </div>
+      </div>
 
-        <div class="glass p-6 rounded-[2rem] mb-6">
+      <!-- PANEL 4: JADWAL PIKET -->
+      <div id="admin-panel-schedule" data-admin-panel="1" class="space-y-6 hidden">
+        <div class="glass p-7 rounded-[2.5rem]">
           <div class="flex items-center justify-between gap-4 mb-4">
             <div>
               <h3 class="text-xs font-black uppercase tracking-widest text-yellow-300">📅 Jadwal Piket Mingguan</h3>
@@ -267,129 +278,114 @@
           <div id="picket-schedule-wrap" class="space-y-3"></div>
           <button id="btn-save-picket-schedule" class="mt-4 px-5 py-3 bg-yellow-700 hover:bg-yellow-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Simpan Jadwal Piket</button>
         </div>
+      </div>
 
-        <div class="grid md:grid-cols-2 gap-6">
-          <!-- Pengaturan Jam -->
-          <div class="glass p-6 rounded-[2rem]">
-            <h3 class="text-xs font-black uppercase tracking-widest text-cyan-300 mb-4">⏰ Pengaturan Jam</h3>
-            <div class="space-y-3">
-              <div>
-                <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Batas Terlambat</label>
-                <input id="set-late" type="time" value="06:30" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-              </div>
-              <div>
-                <label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Batas Alpa</label>
-                <input id="set-alpa" type="time" value="08:00" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/>
-              </div>
-              <button id="btn-save-settings" class="w-full mt-2 py-4 bg-emerald-700 hover:bg-emerald-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">
-                Simpan Pengaturan
-              </button>
-            </div>
-          </div>
-
-          <!-- Export Laporan -->
-          <div class="glass p-6 rounded-[2rem]">
-            <h3 class="text-xs font-black uppercase tracking-widest text-yellow-400 mb-4">📊 Laporan Presensi</h3>
-            <div class="grid gap-3">
-              <button id="btn-export-daily-all" class="py-4 bg-green-700 hover:bg-green-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">
-                Harian (Semua Kelas)
-              </button>
-              <button id="btn-export-alltime" class="py-4 bg-purple-700 hover:bg-purple-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">
-                Total (Selamanya)
-              </button>
-            </div>
+      <!-- PANEL 5: PENGATURAN -->
+      <div id="admin-panel-settings" data-admin-panel="1" class="space-y-6 hidden">
+        <div class="glass p-7 rounded-[2.5rem]">
+          <h3 class="text-xs font-black uppercase tracking-widest text-cyan-300 mb-4">⏰ Pengaturan Jam</h3>
+          <div class="space-y-3">
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Batas Terlambat</label><input id="set-late" type="time" value="06:30" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
+            <div><label class="text-[10px] uppercase tracking-widest font-bold text-gray-400">Batas Alpa</label><input id="set-alpa" type="time" value="08:00" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white mt-1"/></div>
+            <button id="btn-save-settings" class="w-full mt-2 py-4 bg-emerald-700 hover:bg-emerald-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">Simpan Pengaturan</button>
           </div>
         </div>
 
-        <!-- Manajemen Data -->
-        <div class="mt-6 glass p-6 rounded-[2rem]">
+        <div class="glass p-7 rounded-[2.5rem]">
+          <h3 class="text-xs font-black uppercase tracking-widest text-yellow-400 mb-4">📊 Laporan Presensi</h3>
+          <div class="grid gap-3">
+            <button id="btn-export-daily-all" class="py-4 bg-green-700 hover:bg-green-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">Harian (Semua Kelas)</button>
+            <button id="btn-export-alltime" class="py-4 bg-purple-700 hover:bg-purple-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">Total (Selamanya)</button>
+          </div>
+        </div>
+
+        <div class="glass p-7 rounded-[2.5rem]">
           <h3 class="text-xs font-black uppercase tracking-widest text-red-400 mb-4">⚙️ Manajemen Data</h3>
           <div class="grid md:grid-cols-2 gap-3">
-            <button id="btn-reset-statistik" class="py-4 bg-yellow-700 hover:bg-yellow-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">
-              Reset Statistik (Siswa Tetap)
-            </button>
-            <button id="btn-reset-all" class="py-4 bg-red-700 hover:bg-red-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">
-              Reset Semua Data (Hapus Siswa)
-            </button>
+            <button id="btn-reset-statistik" class="py-4 bg-yellow-700 hover:bg-yellow-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">Reset Statistik (Siswa Tetap)</button>
+            <button id="btn-reset-all" class="py-4 bg-red-700 hover:bg-red-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all">Reset Semua Data (Hapus Siswa)</button>
           </div>
           <p class="text-[8px] text-gray-500 uppercase tracking-widest mt-3">Reset statistik: mengosongkan angka kehadiran. Reset semua: menghapus seluruh data siswa.</p>
         </div>
       </div>
 
-      <!-- Scan QR & Manual -->
-      <div id="wali-editor-wrap" class="glass p-6 rounded-[2rem] mb-6">
-          <h3 class="text-xs font-black uppercase tracking-widest text-cyan-300 mb-4">✏️ Edit Data Siswa</h3>
-          <p class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3">NIK dikunci dan tidak bisa diubah.</p>
-          <input id="wali-edit-search" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Cari nama / NIK / absen..."/>
-          <div id="wali-edit-list" class="mt-4 space-y-2 max-h-[240px] overflow-y-auto pr-2"></div>
-          <div class="mt-4 grid md:grid-cols-2 gap-4">
-            <input id="wali-edit-nik" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-gray-400" placeholder="NIK" readonly />
-            <input id="wali-edit-nisn" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="NISN" />
-            <input id="wali-edit-nis" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="NIS" />
-            <input id="wali-edit-nama" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Nama" />
-            <input id="wali-edit-kelas" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Kelas" readonly />
-            <select id="wali-edit-jenis" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white"><option value="L">Laki-laki</option><option value="P">Perempuan</option></select>
-            <input id="wali-edit-agama" class="md:col-span-2 bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Agama" />
-          </div>
-          <button id="btn-wali-update-student" class="mt-4 px-5 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Simpan Perubahan Siswa</button>
-        </div>
-
-        <div id="wali-create-wrap" class="grid lg:grid-cols-2 gap-6">
-        <!-- Scan QR -->
-        <div class="glass p-6 rounded-[2.5rem]">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-white uppercase tracking-widest italic">📸 Scan QR</h3>
-            <div class="text-[10px] text-cyan-400 font-black uppercase tracking-widest">Admin</div>
-          </div>
-
-          <div class="mt-4 flex flex-wrap gap-2">
-            <button data-mode="HADIR" class="mode-pill mode-pill-admin pill-active">✅ Hadir</button>
-            <button data-mode="IZIN" class="mode-pill mode-pill-admin pill-inactive">📝 Izin</button>
-            <button data-mode="SAKIT" class="mode-pill mode-pill-admin pill-inactive">🤒 Sakit</button>
-            <button data-mode="ALPA" class="mode-pill mode-pill-admin pill-inactive">❌ Alpa</button>
-          </div>
-
-          <div class="mt-4 flex gap-3">
-            <button id="admin-start-cam" class="flex-1 py-5 bg-cyan-600 hover:bg-cyan-500 text-white font-black rounded-[2rem] text-[10px] uppercase tracking-widest transition-all">
-              Aktifkan Kamera
-            </button>
-            <button id="admin-stop-cam" class="hidden flex-1 py-5 bg-red-600 hover:bg-red-500 text-white font-black rounded-[2rem] text-[10px] uppercase tracking-widest transition-all">
-              Matikan Kamera
-            </button>
-          </div>
-
-          <div class="mt-4 glass p-4 rounded-[2rem] border border-cyan-500/10 relative min-h-[320px] overflow-hidden bg-black/40">
-            <div id="reader-admin" class="w-full rounded-[1.5rem]"></div>
-            <div id="scan-feedback-admin" class="absolute inset-0 flex items-center justify-center rounded-[2rem] hidden z-10">
-              <div id="feedback-content-admin" class="text-center text-white p-10 rounded-[2rem] shadow-2xl bg-gradient-to-br from-green-700 to-green-900 border border-white/20">
-                <div id="check-icons-admin" class="text-6xl mb-3"></div>
-                <p id="scanned-name-admin" class="text-2xl font-black uppercase tracking-tighter mb-1"></p>
-                <p id="scanned-info-admin" class="text-[10px] opacity-80 font-bold uppercase"></p>
-              </div>
+      <!-- SCAN QR & MANUAL (BAGIAN DARI ADMIN) -->
+      <div id="admin-scan-section" class="hidden space-y-6">
+        <div id="wali-editor-wrap" class="glass p-6 rounded-[2rem] mb-6">
+            <h3 class="text-xs font-black uppercase tracking-widest text-cyan-300 mb-4">✏️ Edit Data Siswa</h3>
+            <p class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3">NIK dikunci dan tidak bisa diubah.</p>
+            <input id="wali-edit-search" class="w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Cari nama / NIK / absen..."/>
+            <div id="wali-edit-list" class="mt-4 space-y-2 max-h-[240px] overflow-y-auto pr-2"></div>
+            <div class="mt-4 grid md:grid-cols-2 gap-4">
+              <input id="wali-edit-nik" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-gray-400" placeholder="NIK" readonly />
+              <input id="wali-edit-nisn" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="NISN" />
+              <input id="wali-edit-nis" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="NIS" />
+              <input id="wali-edit-nama" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Nama" />
+              <input id="wali-edit-kelas" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Kelas" readonly />
+              <select id="wali-edit-jenis" class="bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white"><option value="L">Laki-laki</option><option value="P">Perempuan</option></select>
+              <input id="wali-edit-agama" class="md:col-span-2 bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Agama" />
             </div>
+            <button id="btn-wali-update-student" class="mt-4 px-5 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Simpan Perubahan Siswa</button>
           </div>
 
-          <div class="mt-4">
+          <div id="wali-create-wrap" class="grid lg:grid-cols-2 gap-6">
+          <!-- Scan QR -->
+          <div class="glass p-6 rounded-[2.5rem]">
             <div class="flex items-center justify-between">
-              <h4 class="text-xs font-black uppercase tracking-widest text-gray-200">Log Hari Ini</h4>
-              <button id="admin-refresh-log" class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">
-                Refresh
+              <h3 class="text-sm font-black text-white uppercase tracking-widest italic">📸 Scan QR</h3>
+              <div class="text-[10px] text-cyan-400 font-black uppercase tracking-widest">Admin</div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-2">
+              <button data-mode="HADIR" class="mode-pill mode-pill-admin pill-active">✅ Hadir</button>
+              <button data-mode="IZIN" class="mode-pill mode-pill-admin pill-inactive">📝 Izin</button>
+              <button data-mode="SAKIT" class="mode-pill mode-pill-admin pill-inactive">🤒 Sakit</button>
+              <button data-mode="ALPA" class="mode-pill mode-pill-admin pill-inactive">❌ Alpa</button>
+            </div>
+
+            <div class="mt-4 flex gap-3">
+              <button id="admin-start-cam" class="flex-1 py-5 bg-cyan-600 hover:bg-cyan-500 text-white font-black rounded-[2rem] text-[10px] uppercase tracking-widest transition-all">
+                Aktifkan Kamera
+              </button>
+              <button id="admin-stop-cam" class="hidden flex-1 py-5 bg-red-600 hover:bg-red-500 text-white font-black rounded-[2rem] text-[10px] uppercase tracking-widest transition-all">
+                Matikan Kamera
               </button>
             </div>
-            <div id="admin-log" class="mt-4 space-y-3 max-h-[420px] overflow-y-auto pr-2"></div>
-          </div>
-        </div>
 
-        <!-- Manual -->
-        <div class="glass p-6 rounded-[2.5rem]">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-black text-white uppercase tracking-widest italic">✍️ Manual</h3>
-            <div class="text-[10px] text-gray-400 font-black uppercase tracking-widest">Klik siswa → pilih aksi</div>
+            <div class="mt-4 glass p-4 rounded-[2rem] border border-cyan-500/10 relative min-h-[320px] overflow-hidden bg-black/40">
+              <div id="reader-admin" class="w-full rounded-[1.5rem]"></div>
+              <div id="scan-feedback-admin" class="absolute inset-0 flex items-center justify-center rounded-[2rem] hidden z-10">
+                <div id="feedback-content-admin" class="text-center text-white p-10 rounded-[2rem] shadow-2xl bg-gradient-to-br from-green-700 to-green-900 border border-white/20">
+                  <div id="check-icons-admin" class="text-6xl mb-3"></div>
+                  <p id="scanned-name-admin" class="text-2xl font-black uppercase tracking-tighter mb-1"></p>
+                  <p id="scanned-info-admin" class="text-[10px] opacity-80 font-bold uppercase"></p>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4">
+              <div class="flex items-center justify-between">
+                <h4 class="text-xs font-black uppercase tracking-widest text-gray-200">Log Hari Ini</h4>
+                <button id="admin-refresh-log" class="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">
+                  Refresh
+                </button>
+              </div>
+              <div id="admin-log" class="mt-4 space-y-3 max-h-[420px] overflow-y-auto pr-2"></div>
+            </div>
           </div>
-          <input id="admin-manual-search" class="mt-4 w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white focus:border-cyan-500" placeholder="Cari nama / absen / kelas..."/>
-          <div id="admin-manual-list" class="mt-4 space-y-2 max-h-[650px] overflow-y-auto pr-2"></div>
+
+          <!-- Manual -->
+          <div class="glass p-6 rounded-[2.5rem]">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-black text-white uppercase tracking-widest italic">✍️ Manual</h3>
+              <div class="text-[10px] text-gray-400 font-black uppercase tracking-widest">Klik siswa → pilih aksi</div>
+            </div>
+            <input id="admin-manual-search" class="mt-4 w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white focus:border-cyan-500" placeholder="Cari nama / absen / kelas..."/>
+            <div id="admin-manual-list" class="mt-4 space-y-2 max-h-[650px] overflow-y-auto pr-2"></div>
+          </div>
         </div>
       </div>
+
     </section>
 
     <!-- ========== WALI KELAS SECTION ========== -->
