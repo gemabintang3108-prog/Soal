@@ -738,22 +738,43 @@ function $(id){ return document.getElementById(id); }
 function show(id){ $(id)?.classList.remove("hidden"); }
 function hide(id){ $(id)?.classList.add("hidden"); }
 function setText(id, t){ const el = $(id); if(el) el.textContent = t; }
-function toast(msg){ alert(msg); }
+function toast(msg, isError = true) {
+  const existing = document.getElementById("custom-toast");
+  if (existing) existing.remove();
 
-function setLoading(on, text){
-  const ov = $("loading-overlay");
+  const div = document.createElement("div");
+  div.id = "custom-toast";
+  div.className = "fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999] px-6 py-4 rounded-2xl shadow-2xl text-white font-bold text-xs uppercase tracking-widest transition-all duration-300 " + (isError ? "bg-red-600" : "bg-emerald-600");
+  div.textContent = msg;
+  document.body.appendChild(div);
+
+  // Hilang otomatis setelah 3 detik
+  setTimeout(() => {
+    if (div && div.parentNode) div.remove();
+  }, 3000);
+}
+
+function setLoading(on, text) {
+  const ov = document.getElementById("loading-overlay");
   if (!ov) return;
   
+  // Bersihkan timer lama
+  if (window.loadingTimer) {
+    clearTimeout(window.loadingTimer);
+    window.loadingTimer = null;
+  }
+
   if (on) {
-    if (text) setText("loading-text", text);
+    if (text) document.getElementById("loading-text").textContent = text;
     ov.classList.remove("hidden");
     
-    // HAPUS AUTO HIDE, SERAHIN KE KONTROL MANUAL
-    if (window.loadingTimer) clearTimeout(window.loadingTimer);
-    
+    // SAFETY NET: Jika loading tidak dimatikan manual selama 8 detik, matikan paksa
+    window.loadingTimer = setTimeout(() => {
+      ov.classList.add("hidden");
+      console.warn("Loading force closed karena timeout");
+    }, 8000);
   } else {
     ov.classList.add("hidden");
-    if (window.loadingTimer) clearTimeout(window.loadingTimer);
   }
 }
 
@@ -779,12 +800,21 @@ function ensureBuckets(){
   });
 }
 
-function normalizeClassName(kelas){
-  let v = String(kelas || '').trim().toUpperCase().replace(/\s+/g, '');
+function normalizeClassTokenV4(value){
+  let v = String(value || '').trim().toUpperCase();
+  if (!v) return '';
+  v = v.replace(/_/g, '-').replace(/\s+/g, '');
+  v = v.replace(/^XII(\d+)$/, 'XII-$1');
+  v = v.replace(/^XI(\d+)$/, 'XI-$1');
+  v = v.replace(/^X(\d+)$/, 'X-$1');
   v = v.replace(/^XII-?(\d+)$/, 'XII-$1');
   v = v.replace(/^XI-?(\d+)$/, 'XI-$1');
   v = v.replace(/^X-?(\d+)$/, 'X-$1');
   return v;
+}
+
+function normalizeClassName(kelas){
+  return normalizeClassTokenV4(kelas);
 }
 
 function normalizeNik(v){
@@ -932,7 +962,7 @@ function studentKey(kelas, absen){
 }
 
 function normalizeStudentRow(row){
-  return {
+  const out = {
     NIK: normalizeNik(row.NIK),
     NISN: String(row.NISN || '-').trim(),
     NIS: String(row.NIS || '-').trim(),
@@ -943,9 +973,9 @@ function normalizeStudentRow(row){
     JK: row.JK || row.Jenis || '-',
     Agama: row.Agama || '-',
     NoHP: String(row.NoHP || '-').trim(),
-    Jam: row.Jam || '-',
-    JamTerlambat: row.JamTerlambat || '-',
-    Tanggal: row.Tanggal || '-',
+    Jam: (row.Jam && row.Jam !== '-') ? String(row.Jam).replace(/\./g, ':') : '-',
+    JamTerlambat: (row.JamTerlambat && row.JamTerlambat !== '-') ? String(row.JamTerlambat).replace(/\./g, ':') : '-',
+    Tanggal: patchNormalizeDateId(row.Tanggal) || '-',
     Status: row.Status || '-',
     Hadir: Number(row.Hadir || 0),
     Sakit: Number(row.Sakit || 0),
@@ -956,6 +986,7 @@ function normalizeStudentRow(row){
     PulangCepat: Number(row.PulangCepat || 0),
     Catatan: row.Catatan || '-'
   };
+  return out;
 }
 
 function migrateStudentsSchema(){
@@ -1393,23 +1424,40 @@ async function loadAllFromFirestore() {
 }
 
 async function syncClassToFirestore(kelas) {
+  const kelasFix = normalizeClassName(kelas);
+  if (!kelasFix) return;
+  resequenceClassAlphabetical(kelasFix);
+  saveCacheDB();
+
   try {
+    if (!patchFirestoreReady()) return;
     const db = firebase.firestore();
-    const batch = db.batch();
-    const kelasRef = db.collection("kelas").doc(kelas).collection("siswa");
-    
+    const kelasRef = db.collection('kelas').doc(kelasFix).collection('siswa');
     const snapshot = await kelasRef.get();
-    snapshot.forEach(doc => batch.delete(doc.ref));
+    const students = (localDB[kelasFix] || []).map(s => normalizeStudentRow({ ...s, Kelas: kelasFix }));
+    const desiredIds = new Set(students.map(s => patchSafeFirestoreDocId(normalizeAbsen(s.Absen))));
     
-    (localDB[kelas] || []).forEach(siswa => {
-      const docRef = kelasRef.doc(siswa.Absen);
-      batch.set(docRef, siswa);
-    });
-    
-    await batch.commit();
-  } catch (e) {
-    console.error("Gagal sync ke Firestore:", e);
-  }
+    let batch = db.batch();
+    let count = 0;
+
+    // Hapus hanya siswa yang sudah tidak ada di localDB
+    for (const doc of snapshot.docs) {
+      if (!desiredIds.has(doc.id)) {
+        batch.delete(doc.ref);
+        count++;
+        if (count >= 400) { await batch.commit(); batch = db.batch(); count = 0; }
+      }
+    }
+
+    // Set/Update siswa yang ada
+    for (const s of students) {
+      batch.set(kelasRef.doc(patchSafeFirestoreDocId(normalizeAbsen(s.Absen))), s, { merge: true });
+      count++;
+      if (count >= 400) { await batch.commit(); batch = db.batch(); count = 0; }
+    }
+
+    if (count > 0) await batch.commit();
+  } catch (e) { console.error("Gagal sync kelas:", e); throw e; }
 }
 
 async function syncAllToFirestore() {
@@ -1650,6 +1698,7 @@ function applyRoleTabVisibility(){
 }
 
 function setRoleTab(tabId){
+  stopAllScanners();
   activeRoleTab = tabId;
   renderRoleTabs();
   applyRoleTabVisibility();
@@ -3670,7 +3719,29 @@ function resequenceClassAlphabetical(kelas){
   localDB[kelas] = sortStudentsAlpha((localDB[kelas] || []).map(s => ({ ...s, Kelas: kelas })));
 }
 function resequenceAllClasses(){ DAFTAR_KELAS.forEach(resequenceClassAlphabetical); saveCacheDB(); }
-function classesSorted(){ return DAFTAR_KELAS.slice(); }
+function classSortKeyV4(kelas){
+  const raw = String(kelas || '').trim().toUpperCase();
+  const m = raw.match(/^(XII|XI|X)-?(\d+)$/);
+  if (!m) return [99, raw, 999];
+  const gradeOrder = { X: 1, XI: 2, XII: 3 };
+  return [gradeOrder[m[1]] || 99, m[1], Number(m[2] || 0)];
+}
+
+function sortClassNamesV4(list){
+  return Array.from(new Set((list || []).map(x => normalizeClassTokenV4(x)).filter(Boolean)))
+    .sort((a, b) => {
+      const ak = classSortKeyV4(a);
+      const bk = classSortKeyV4(b);
+      if (ak[0] !== bk[0]) return ak[0] - bk[0];
+      if (ak[1] !== bk[1]) return String(ak[1]).localeCompare(String(bk[1]), 'id', { sensitivity: 'base' });
+      if (ak[2] !== bk[2]) return ak[2] - bk[2];
+      return String(a).localeCompare(String(b), 'id', { numeric: true, sensitivity: 'base' });
+    });
+}
+
+function classesSorted(){
+  return sortClassNamesV4(DAFTAR_KELAS);
+}
 function adminStudentSelectedClass(){ return normalizeClassName($('admin-student-class-picker')?.value || DAFTAR_KELAS[0]); }
 function studentFormReset(){
   if ($('student-form-title')) $('student-form-title').textContent='Tambah Data Siswa';
@@ -3681,8 +3752,16 @@ function studentFormReset(){
   if ($('admin-student-qr-result')) $('admin-student-qr-result').innerHTML='';
 }
 function populateStudentClassSelects(){
-  const opts = classesSorted().map(k=>`<option value="${k}">${k}</option>`).join('');
-  ['student-kelas','admin-student-class-picker'].forEach(id=>{ const el=$(id); if(el){ const cur=el.value; el.innerHTML=opts; if(cur && DAFTAR_KELAS.includes(cur)) el.value=cur; }});
+  const options = classesSorted();
+  ['student-kelas', 'admin-student-class-picker', 'pelajaran-kelas', 'piket-dp-kelas'].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    const current = normalizeClassTokenV4(el.value || '');
+    const placeholder = id === 'pelajaran-kelas' ? 'Pilih kelas...' : 'Pilih kelas';
+    el.innerHTML = (id === 'admin-student-class-picker' ? '' : `<option value="">${placeholder}</option>`) + options.map(k => `<option value="${k}">${k}</option>`).join('');
+    if (current && options.includes(current)) el.value = current;
+    else if (id === 'admin-student-class-picker' && options[0]) el.value = options[0];
+  });
 }
 function normalizeAccount(acc){
   const out = {
@@ -3692,7 +3771,7 @@ function normalizeAccount(acc){
     kelas: acc?.kelas ? String(acc.kelas).trim() : null,
     displayName: String(acc?.displayName || acc?.username || '').trim(),
     nip: String(acc?.nip || '').trim(),
-    mengajar: Array.isArray(acc?.mengajar) ? acc.mengajar.map(x => normalizeClassName(x)).filter(Boolean) : String(acc?.mengajar || '').split(',').map(x => normalizeClassName(x)).filter(Boolean),
+    mengajar: Array.isArray(acc?.mengajar) ? acc.mengajar.map(x => normalizeClassTokenV4(x)).filter(Boolean) : String(acc?.mengajar || '').split(',').map(x => normalizeClassTokenV4(x)).filter(Boolean),
     parentAbsen: acc?.parentAbsen ? normalizeAbsen(acc.parentAbsen) : null,
     parentPhone: acc?.parentPhone ? normalizePhone(acc.parentPhone) : null,
     isWaliKelas: !!(acc?.isWaliKelas || acc?.waliKelas?.enabled),
@@ -4238,1707 +4317,9 @@ function renderAll(){
   }
   if (teacherCanUsePelajaran()) renderPelajaranPanel();
 }
-const __oldInit = init;
-init = async function(){
-  await __oldInit();
-  setupAdminUi();
-  setupWaliUi();
-  if ($('btn-export-student-excel')) $('btn-export-student-excel').classList.add('hidden');
-  populateStudentClassSelects();
-  studentFormReset();
-  resetAccountForm();
-  bindPatchedEvents();
-  renderAll();
-};
-window.onload = init;
-/* ===================== PATCH V4 ADMIN / KELAS / PELAJARAN ===================== */
-const DEFAULT_CLASS_LIST_V4 = DAFTAR_KELAS.slice();
-const CLASS_LIST_STORAGE_KEY_V4 = 'ABSEN_CLASS_LIST_V4';
-let selectedPicketTeacherV4 = null;
-let pelajaranClockTimerV4 = null;
-
-function classSortKeyV4(kelas){
-  const raw = String(kelas || '').trim().toUpperCase();
-  const m = raw.match(/^(XII|XI|X)-?(\d+)$/);
-  if (!m) return [99, raw, 999];
-  const gradeOrder = { X: 1, XI: 2, XII: 3 };
-  return [gradeOrder[m[1]] || 99, m[1], Number(m[2] || 0)];
-}
-
-function sortClassNamesV4(list){
-  return Array.from(new Set((list || []).map(x => normalizeClassTokenV4(x)).filter(Boolean)))
-    .sort((a, b) => {
-      const ak = classSortKeyV4(a);
-      const bk = classSortKeyV4(b);
-      if (ak[0] !== bk[0]) return ak[0] - bk[0];
-      if (ak[1] !== bk[1]) return String(ak[1]).localeCompare(String(bk[1]), 'id', { sensitivity: 'base' });
-      if (ak[2] !== bk[2]) return ak[2] - bk[2];
-      return String(a).localeCompare(String(b), 'id', { numeric: true, sensitivity: 'base' });
-    });
-}
-
-function normalizeClassTokenV4(value){
-  let v = String(value || '').trim().toUpperCase();
-  if (!v) return '';
-  v = v.replace(/_/g, '-').replace(/\s+/g, '');
-  v = v.replace(/^XII(\d+)$/, 'XII-$1');
-  v = v.replace(/^XI(\d+)$/, 'XI-$1');
-  v = v.replace(/^X(\d+)$/, 'X-$1');
-  v = v.replace(/^XII-?(\d+)$/, 'XII-$1');
-  v = v.replace(/^XI-?(\d+)$/, 'XI-$1');
-  v = v.replace(/^X-?(\d+)$/, 'X-$1');
-  return v;
-}
-
-function normalizeClassName(kelas){
-  return normalizeClassTokenV4(kelas);
-}
-
-function parseClassListInputV4(text){
-  const source = Array.isArray(text) ? text : String(text || '').split(/[\n,;]+/);
-  const cleaned = source.map(normalizeClassTokenV4).filter(Boolean);
-  return sortClassNamesV4(cleaned.length ? cleaned : DEFAULT_CLASS_LIST_V4);
-}
-
-function currentClassListV4(){
-  return DAFTAR_KELAS.slice();
-}
-
-function classListsEqualV4(a, b){
-  if ((a || []).length !== (b || []).length) return false;
-  return (a || []).every((item, idx) => item === (b || [])[idx]);
-}
-
-function persistClassListCacheV4(list){
-  try { localStorage.setItem(CLASS_LIST_STORAGE_KEY_V4, JSON.stringify(list)); } catch {}
-}
-
-function restoreClassListCacheV4(){
-  try {
-    const raw = localStorage.getItem(CLASS_LIST_STORAGE_KEY_V4);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const list = parseClassListInputV4(Array.isArray(parsed) ? parsed : []);
-    return list.length ? list : null;
-  } catch {
-    return null;
-  }
-}
-
-function applyClassListV4(list, { saveCache = true, dropRemovedLocal = false } = {}){
-  const next = parseClassListInputV4(list);
-  if (!next.length) return currentClassListV4();
-  DAFTAR_KELAS.splice(0, DAFTAR_KELAS.length, ...next);
-  settings.classList = next.slice();
-  ensureBuckets();
-  if (dropRemovedLocal) {
-    Object.keys(localDB || {}).forEach(k => {
-      if (!DAFTAR_KELAS.includes(k)) delete localDB[k];
-    });
-  }
-  if (saveCache) persistClassListCacheV4(next);
-  return next;
-}
-
-function classesSorted(){
-  return sortClassNamesV4(DAFTAR_KELAS);
-}
-
-function adminStudentSelectedClass(){
-  const current = normalizeClassTokenV4($('admin-student-class-picker')?.value || '');
-  const all = classesSorted();
-  return current && all.includes(current) ? current : (all[0] || '');
-}
-
-function populateAccountClassSelect(){
-  const options = classesSorted();
-  const fill = (id, firstLabel = 'Pilih Kelas') => {
-    const el = $(id);
-    if (!el) return;
-    const current = normalizeClassTokenV4(el.value || '');
-    el.innerHTML = `<option value="">${firstLabel}</option>` + options.map(k => `<option value="${k}">${k}</option>`).join('');
-    if (current && options.includes(current)) el.value = current;
-  };
-  fill('acc-kelas', 'Pilih Kelas Anak');
-  fill('acc-siswa-kelas', 'Pilih Kelas');
-}
-
-function populateStudentClassSelects(){
-  const options = classesSorted();
-  ['student-kelas', 'admin-student-class-picker', 'pelajaran-kelas', 'piket-dp-kelas'].forEach(id => {
-    const el = $(id);
-    if (!el) return;
-    const current = normalizeClassTokenV4(el.value || '');
-    const placeholder = id === 'pelajaran-kelas' ? 'Pilih kelas...' : 'Pilih kelas';
-    el.innerHTML = (id === 'admin-student-class-picker' ? '' : `<option value="">${placeholder}</option>`) + options.map(k => `<option value="${k}">${k}</option>`).join('');
-    if (current && options.includes(current)) el.value = current;
-    else if (id === 'admin-student-class-picker' && options[0]) el.value = options[0];
-  });
-}
-
-function fillLoginClassSelect(){
-  const sel = $('login-class');
-  if (!sel) return;
-  const current = normalizeClassTokenV4(sel.value || '');
-  const options = classesSorted();
-  sel.innerHTML = '<option value="">Pilih Kelas</option>' + options.map(k => `<option value="${k}">${k}</option>`).join('');
-  if (current && options.includes(current)) sel.value = current;
-}
-
-function teacherCanUsePelajaran(){
-  return session.role === 'guru';
-}
-
-function availableClassesForTeacherV4(){
-  const allowed = Array.isArray(session.mengajar) ? session.mengajar.map(normalizeClassTokenV4).filter(Boolean) : [];
-  const valid = allowed.filter(k => classesSorted().includes(k));
-  return sortClassNamesV4(valid);
-}
-
-function normalizeAccount(acc){
-  const allClasses = classesSorted();
-  const out = {
-    username: String(acc?.username || '').trim(),
-    password: String(acc?.password || ''),
-    role: String(acc?.role || '').trim(),
-    kelas: acc?.kelas ? normalizeClassTokenV4(acc.kelas) : null,
-    displayName: String(acc?.displayName || acc?.username || '').trim(),
-    nip: String(acc?.nip || '').trim(),
-    mengajar: (Array.isArray(acc?.mengajar) ? acc.mengajar : String(acc?.mengajar || '').split(/[;,\n]+/)).map(normalizeClassTokenV4).filter(k => allClasses.includes(k)),
-    parentAbsen: acc?.parentAbsen ? normalizeAbsen(acc.parentAbsen) : null,
-    parentPhone: acc?.parentPhone ? normalizePhone(acc.parentPhone) : null,
-    isWaliKelas: !!(acc?.isWaliKelas || acc?.waliKelas?.enabled),
-    waliKelas: acc?.waliKelas?.kelas ? normalizeClassTokenV4(acc.waliKelas.kelas) : (acc?.waliKelas ? normalizeClassTokenV4(acc.waliKelas) : null)
-  };
-  if (out.role !== 'guru') {
-    out.isWaliKelas = false;
-    out.waliKelas = null;
-    out.nip = '';
-    out.mengajar = [];
-  }
-  if (out.role === 'guru') {
-    if (out.waliKelas && !allClasses.includes(out.waliKelas)) out.waliKelas = null;
-    if (out.isWaliKelas && out.waliKelas && !out.mengajar.includes(out.waliKelas)) out.mengajar.push(out.waliKelas);
-    out.mengajar = sortClassNamesV4(out.mengajar);
-  }
-  if (out.role !== 'orangtua') {
-    out.kelas = null;
-    out.parentAbsen = null;
-    out.parentPhone = null;
-  } else if (out.kelas && !allClasses.includes(out.kelas)) {
-    out.kelas = null;
-    out.parentAbsen = null;
-  }
-  return out;
-}
-
-function assignedWaliClassesV4(exceptUsername = ''){
-  const taken = new Set();
-  accountsDB.forEach(acc => {
-    if (acc.role !== 'guru' || !acc.isWaliKelas || !acc.waliKelas) return;
-    if (exceptUsername && String(acc.username || '').toLowerCase() === String(exceptUsername || '').toLowerCase()) return;
-    taken.add(normalizeClassTokenV4(acc.waliKelas));
-  });
-  return taken;
-}
-
-function selectedMengajarClassesV4(){
-  const raw = String($('acc-guru-mengajar')?.value || '');
-  return parseClassListInputV4(raw).filter(k => classesSorted().includes(k));
-}
-
-function setSelectedMengajarClassesV4(list){
-  const next = sortClassNamesV4((list || []).filter(k => classesSorted().includes(normalizeClassTokenV4(k))));
-  if ($('acc-guru-mengajar')) $('acc-guru-mengajar').value = next.join(', ');
-}
-
-function selectedWaliClassV4(){
-  return normalizeClassTokenV4($('acc-wali-kelas')?.value || '');
-}
-
-function setSelectedWaliClassV4(kelas){
-  const val = normalizeClassTokenV4(kelas || '');
-  if ($('acc-wali-kelas')) $('acc-wali-kelas').value = val;
-}
-
-function ensureAccountClassUiV4(){
-  const mengajarInput = $('acc-guru-mengajar');
-  if (mengajarInput && !$('acc-guru-mengajar-buttons')) {
-    mengajarInput.classList.add('hidden');
-    const wrap = document.createElement('div');
-    wrap.id = 'acc-guru-mengajar-buttons';
-    wrap.className = 'mt-3 flex flex-wrap gap-2';
-    mengajarInput.insertAdjacentElement('afterend', wrap);
-  }
-  const waliInput = $('acc-wali-kelas');
-  if (waliInput && !$('acc-wali-kelas-buttons')) {
-    waliInput.classList.add('hidden');
-    const wrap = document.createElement('div');
-    wrap.id = 'acc-wali-kelas-buttons';
-    wrap.className = 'mt-3 flex flex-wrap gap-2';
-    waliInput.insertAdjacentElement('afterend', wrap);
-  }
-  const guruExtra = $('acc-guru-extra-wrap');
-  if (guruExtra) {
-    const label = guruExtra.querySelector('label');
-    if (label) label.textContent = 'Mengajar';
-    const note = guruExtra.querySelector('input')?.parentElement;
-    if (note && !$('acc-guru-mengajar-help')) {
-      const help = document.createElement('p');
-      help.id = 'acc-guru-mengajar-help';
-      help.className = 'text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-2';
-      help.textContent = 'Pilih tombol kelas yang diajar. Sumber kelas mengikuti tab Kelas.';
-      const target = $('acc-guru-mengajar-buttons') || $('acc-guru-mengajar');
-      if (target) target.insertAdjacentElement('afterend', help);
-    }
-  }
-  const waliWrap = $('acc-guru-wrap');
-  if (waliWrap) {
-    const helpId = 'acc-wali-help-v4';
-    if (!$(helpId)) {
-      const help = document.createElement('p');
-      help.id = helpId;
-      help.className = 'text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-2';
-      help.textContent = 'Kelas wali yang sudah dipakai guru lain otomatis disembunyikan.';
-      const target = $('acc-wali-kelas-buttons') || $('acc-wali-kelas');
-      if (target) target.insertAdjacentElement('afterend', help);
-    }
-  }
-}
-
-function renderClassButtonsV4(targetId, classes, selected, { multiple = true, onClick = null, emptyText = 'Belum ada kelas aktif.' } = {}){
-  const wrap = $(targetId);
-  if (!wrap) return;
-  const picked = new Set((multiple ? (selected || []) : [selected || '']).filter(Boolean).map(normalizeClassTokenV4));
-  if (!(classes || []).length) {
-    wrap.innerHTML = `<div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">${emptyText}</div>`;
-    return;
-  }
-  wrap.innerHTML = classes.map(k => {
-    const active = picked.has(k);
-    return `<button type="button" class="account-class-chip px-4 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest ${active ? 'border-cyan-500 bg-cyan-500/20 text-cyan-200' : 'border-gray-700 text-gray-300 hover:border-cyan-500/40'}" data-class-value="${k}">${k}</button>`;
-  }).join('');
-  wrap.querySelectorAll('[data-class-value]').forEach(btn => btn.onclick = () => onClick && onClick(btn.dataset.classValue));
-}
-
-function renderAccountClassPickersV4(){
-  ensureAccountClassUiV4();
-  const currentRole = $('acc-role')?.value || 'guru';
-  const allClasses = classesSorted();
-  const currentIndex = $('acc-edit-index')?.value || '';
-  const currentUsername = currentIndex !== '' && !Number.isNaN(Number(currentIndex)) ? (accountsDB[Number(currentIndex)]?.username || '') : '';
-  const takenWali = assignedWaliClassesV4(currentUsername);
-  const selectedMengajar = selectedMengajarClassesV4();
-  const waliSelected = selectedWaliClassV4();
-  renderClassButtonsV4('acc-guru-mengajar-buttons', allClasses, selectedMengajar, {
-    multiple: true,
-    emptyText: 'Isi kelas aktif dulu di tab Kelas.',
-    onClick: (kelas) => {
-      const next = new Set(selectedMengajarClassesV4());
-      if (next.has(kelas)) next.delete(kelas); else next.add(kelas);
-      setSelectedMengajarClassesV4(Array.from(next));
-      if (selectedWaliClassV4() && !next.has(selectedWaliClassV4())) {
-        next.add(selectedWaliClassV4());
-        setSelectedMengajarClassesV4(Array.from(next));
-      }
-      renderAccountClassPickersV4();
-    }
-  });
-  const waliOptions = allClasses.filter(k => !takenWali.has(k) || k === waliSelected);
-  renderClassButtonsV4('acc-wali-kelas-buttons', waliOptions, waliSelected, {
-    multiple: false,
-    emptyText: 'Semua kelas wali sudah dipakai atau belum ada kelas aktif.',
-    onClick: (kelas) => {
-      const currently = selectedWaliClassV4();
-      setSelectedWaliClassV4(currently === kelas ? '' : kelas);
-      if (selectedWaliClassV4()) {
-        if ($('acc-is-wali')) $('acc-is-wali').checked = true;
-        const merged = new Set(selectedMengajarClassesV4());
-        merged.add(selectedWaliClassV4());
-        setSelectedMengajarClassesV4(Array.from(merged));
-      }
-      renderAccountClassPickersV4();
-    }
-  });
-  const mengajarWrap = $('acc-guru-extra-wrap');
-  const waliWrap = $('acc-guru-wrap');
-  if (mengajarWrap) mengajarWrap.classList.toggle('hidden', currentRole !== 'guru');
-  if (waliWrap) waliWrap.classList.toggle('hidden', currentRole !== 'guru');
-  const waliButtons = $('acc-wali-kelas-buttons');
-  const isWali = !!$('acc-is-wali')?.checked;
-  if (waliButtons) waliButtons.classList.toggle('opacity-40', !isWali || currentRole !== 'guru');
-  if (!isWali || currentRole !== 'guru') setSelectedWaliClassV4('');
-}
-
-function toggleAccountFieldVisibility(){
-  const role = $('acc-role')?.value || 'admin';
-  $('acc-guru-wrap')?.classList.toggle('hidden', role !== 'guru');
-  $('acc-guru-extra-wrap')?.classList.toggle('hidden', role !== 'guru');
-  $('acc-kelas-wrap')?.classList.toggle('hidden', role !== 'orangtua');
-  $('acc-absen-wrap')?.classList.toggle('hidden', role !== 'orangtua');
-  $('acc-hp-wrap')?.classList.toggle('hidden', role !== 'orangtua');
-  renderAccountClassPickersV4();
-}
-
-function resetAccountForm(){
-  if ($('acc-form-title')) $('acc-form-title').textContent = 'Buat Akun Guru / Orang Tua';
-  if ($('acc-edit-index')) $('acc-edit-index').value = '';
-  ['acc-name','acc-username','acc-password','acc-guru-nip','acc-guru-mengajar','acc-wali-kelas','acc-absen','acc-hp'].forEach(id => { if ($(id)) $(id).value = ''; });
-  if ($('acc-role')) $('acc-role').value = 'guru';
-  if ($('acc-kelas')) $('acc-kelas').value = '';
-  if ($('acc-is-wali')) $('acc-is-wali').checked = false;
-  if ($('btn-account-save')) $('btn-account-save').textContent = 'Simpan Akun';
-  populateAccountClassSelect();
-  toggleAccountFieldVisibility();
-}
-
-function startEditAccount(index){
-  const acc = accountsDB[index]; if (!acc) return;
-  if ($('acc-form-title')) $('acc-form-title').textContent = 'Edit Akun';
-  if ($('acc-edit-index')) $('acc-edit-index').value = String(index);
-  if ($('acc-name')) $('acc-name').value = acc.displayName || '';
-  if ($('acc-username')) $('acc-username').value = acc.username || '';
-  if ($('acc-password')) $('acc-password').value = acc.password || '';
-  if ($('acc-role')) $('acc-role').value = acc.role || 'guru';
-  if ($('acc-guru-nip')) $('acc-guru-nip').value = acc.nip || '';
-  if ($('acc-guru-mengajar')) $('acc-guru-mengajar').value = (acc.mengajar || []).join(', ');
-  if ($('acc-is-wali')) $('acc-is-wali').checked = !!acc.isWaliKelas;
-  if ($('acc-wali-kelas')) $('acc-wali-kelas').value = acc.waliKelas || '';
-  populateAccountClassSelect();
-  if ($('acc-kelas')) $('acc-kelas').value = acc.kelas || '';
-  if ($('acc-absen')) $('acc-absen').value = acc.parentAbsen || '';
-  if ($('acc-hp')) $('acc-hp').value = acc.parentPhone || '';
-  if ($('btn-account-save')) $('btn-account-save').textContent = 'Update Akun';
-  toggleAccountFieldVisibility();
-  setRoleTab('view-admin-accounts');
-}
-
-function renderAccounts(){
-  const box = $('account-list'); if (!box) return;
-  const rows = accountsDB.slice().sort((a, b) => String(a.displayName || a.username).localeCompare(String(b.displayName || b.username), 'id', { sensitivity: 'base' }));
-  box.innerHTML = rows.map(acc => {
-    const idx = accountsDB.findIndex(x => x.username === acc.username);
-    const meta = [
-      acc.role.toUpperCase(),
-      acc.nip ? `NIP ${acc.nip}` : null,
-      (acc.mengajar || []).length ? `MENGAJAR ${acc.mengajar.join(', ')}` : null,
-      acc.isWaliKelas && acc.waliKelas ? `WALI ${acc.waliKelas}` : null,
-      acc.role === 'orangtua' && acc.kelas ? `KELAS ${acc.kelas}` : null
-    ].filter(Boolean).join(' • ');
-    return `<div class="glass p-4 rounded-[1.75rem] flex flex-col md:flex-row md:items-center md:justify-between gap-3"><div><div class="text-xs font-black uppercase tracking-widest text-white">${acc.displayName || acc.username}</div><div class="text-[10px] uppercase tracking-widest text-cyan-300 font-bold mt-1">@${acc.username}</div><div class="text-[10px] uppercase tracking-widest text-gray-400 font-bold mt-2">${meta || '-'}</div></div><div class="flex gap-2"><button onclick="startEditAccount(${idx})" class="px-4 py-2 rounded-xl border border-cyan-500/30 text-cyan-300 text-[10px] font-black uppercase tracking-widest">Edit</button><button onclick="deleteAccount(${idx})" class="px-4 py-2 rounded-xl border border-red-500/30 text-red-400 text-[10px] font-black uppercase tracking-widest">Hapus</button></div></div>`;
-  }).join('') || '<div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Belum ada akun.</div>';
-}
-
-async function saveAccountForm(){
-  if (session.role !== 'admin') return toast('Hanya admin yang bisa mengelola akun.');
-  const editIndex = $('acc-edit-index')?.value ?? '';
-  const role = String($('acc-role')?.value || '').trim();
-  const username = String($('acc-username')?.value || '').trim();
-  const password = String($('acc-password')?.value || '').trim();
-  const displayName = String($('acc-name')?.value || '').trim();
-  const kelas = normalizeClassTokenV4($('acc-kelas')?.value || '');
-  const parentAbsen = String($('acc-absen')?.value || '').trim();
-  const parentPhone = String($('acc-hp')?.value || '').trim();
-  const nip = String($('acc-guru-nip')?.value || '').trim();
-  const mengajar = selectedMengajarClassesV4();
-  const isWaliKelas = !!$('acc-is-wali')?.checked;
-  const waliKelas = selectedWaliClassV4();
-  const allClasses = classesSorted();
-  if (!['admin','guru','orangtua'].includes(role)) return toast('Role akun tidak valid.');
-  if (!username || !password || !displayName) return toast('Nama, username, dan password wajib diisi.');
-  if (role === 'guru' && !nip) return toast('NIP guru wajib diisi.');
-  if (role === 'guru' && !mengajar.length) return toast('Pilih minimal 1 kelas pada bagian Mengajar.');
-  if (role === 'guru' && mengajar.some(k => !allClasses.includes(k))) return toast('Ada kelas mengajar yang tidak tersedia di tab Kelas.');
-  if (role === 'guru' && isWaliKelas && !waliKelas) return toast('Pilih kelas wali dari tombol yang tersedia.');
-  if (role === 'guru' && waliKelas && !allClasses.includes(waliKelas)) return toast('Kelas wali tidak valid.');
-  if (role === 'guru' && isWaliKelas) {
-    const currentUsername = editIndex !== '' ? (accountsDB[Number(editIndex)]?.username || '') : '';
-    if (assignedWaliClassesV4(currentUsername).has(waliKelas)) return toast(`Kelas ${waliKelas} sudah dipakai wali kelas lain.`);
-  }
-  if (role === 'orangtua' && (!kelas || !parentAbsen)) return toast('Kelas dan no absen anak wajib diisi.');
-  if (role === 'orangtua' && !allClasses.includes(kelas)) return toast('Kelas anak belum ada di tab Kelas.');
-  const duplicate = accountsDB.findIndex(a => a.username.toLowerCase() === username.toLowerCase());
-  if (duplicate >= 0 && String(duplicate) !== String(editIndex)) return toast('Username sudah dipakai.');
-  const account = applyAccountRules({ username, password, role, displayName, kelas, parentAbsen, parentPhone, nip, mengajar, isWaliKelas, waliKelas });
-  if (editIndex === '') accountsDB.push(account); else accountsDB[Number(editIndex)] = account;
-  if (!accountsDB.some(a => a.role === 'admin')) return toast('Minimal harus ada 1 akun admin.');
-  saveAccountsCache();
-  try {
-    setLoading(true, 'Menyimpan akun...');
-    await saveAccountsToFirestore();
-    resetAccountForm();
-    renderAll();
-    toast('Akun berhasil disimpan.');
-  } catch (e) {
-    toast('Gagal simpan akun: ' + e.message);
-  } finally {
-    setLoading(false);
-  }
-}
-
-function setupAdminUiV4(){
-  setupAdminUi();
-  const section = $('view-admin');
-  if (!section) return;
-  const studentsPanel = $('admin-panel-students');
-  if (studentsPanel) {
-    const studentTitle = studentsPanel.querySelector('#student-form-title');
-    if (studentTitle) studentTitle.textContent = '🧾 Data Siswa + QR';
-    const topCardTitle = studentsPanel.querySelector('h3.text-xs');
-    if (topCardTitle && topCardTitle.textContent.includes('Bulk Data Siswa')) topCardTitle.textContent = '👨‍🎓 Bulk Data Siswa + QR ZIP';
-    const tabStudentHeading = studentsPanel.querySelector('#admin-student-summary')?.previousElementSibling?.querySelector('h3');
-    if (tabStudentHeading) tabStudentHeading.textContent = '📚 Data Siswa per Kelas';
-    if (!$('btn-student-preview-qr') && $('btn-student-save')) {
-      const btnRow = $('btn-student-save').parentElement;
-      const previewBtn = document.createElement('button');
-      previewBtn.id = 'btn-student-preview-qr';
-      previewBtn.className = 'px-5 py-3 bg-emerald-700 hover:bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all';
-      previewBtn.textContent = 'Preview QR';
-      const zipBtn = document.createElement('button');
-      zipBtn.id = 'btn-student-export-qr-class';
-      zipBtn.className = 'px-5 py-3 bg-yellow-700 hover:bg-yellow-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all';
-      zipBtn.textContent = 'Download QR Kelas';
-      btnRow.insertBefore(previewBtn, $('btn-student-export-excel'));
-      btnRow.insertBefore(zipBtn, $('btn-student-export-excel'));
-    }
-  }
-  if (!$('admin-panel-classes')) {
-    const panel = document.createElement('div');
-    panel.id = 'admin-panel-classes';
-    panel.dataset.adminPanel = '1';
-    panel.className = 'space-y-6 hidden';
-    panel.innerHTML = `
-      <div class="glass p-6 rounded-[2rem]">
-        <div class="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h3 class="text-xs font-black uppercase tracking-widest text-cyan-300">🏫 Tab Kelas</h3>
-            <p class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-2">Isi daftar kelas aktif manual. Contoh: X-1, X-2, XI-6. Pilihan kelas di akun, data siswa, tab pelajaran, dan piket akan otomatis ikut daftar ini.</p>
-          </div>
-          <button id="btn-class-list-reset-default" class="px-4 py-3 border border-gray-700 text-gray-300 rounded-2xl text-[10px] font-black uppercase tracking-widest">Reset Default</button>
-        </div>
-        <textarea id="set-class-list" rows="5" class="w-full mt-4 bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white text-sm" placeholder="X-1, X-2, XI-6"></textarea>
-        <div class="flex flex-wrap gap-3 mt-4">
-          <button id="btn-save-class-list" class="px-5 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Simpan Kelas</button>
-          <button id="btn-class-list-refresh" class="px-5 py-3 border border-gray-700 text-gray-300 rounded-2xl text-[10px] font-black uppercase tracking-widest">Muat Ulang Daftar</button>
-        </div>
-        <div id="class-list-summary-v4" class="mt-4 text-[10px] uppercase tracking-widest text-gray-400 font-bold">-</div>
-        <div id="class-list-chips-v4" class="mt-4 flex flex-wrap gap-2"></div>
-        <div class="mt-4 text-[10px] uppercase tracking-widest text-yellow-300 font-bold">Kalau ada kelas yang mau dihapus, pastikan kelas itu sudah kosong dari siswa dan tidak dipakai akun guru/orang tua.</div>
-      </div>`;
-    section.appendChild(panel);
-  }
-  const accountBox = $('admin-panel-accounts');
-  if (accountBox) {
-    const formTitle = $('acc-form-title');
-    if (formTitle && !formTitle.textContent.includes('Akun')) formTitle.textContent = formTitle.textContent.replace('Buat Akun Guru / Orang Tua', 'Buat Akun Guru / Orang Tua');
-  }
-  ensureAccountClassUiV4();
-  syncClassManagerUiV4();
-}
-
-function syncClassManagerUiV4(){
-  const textarea = $('set-class-list');
-  const list = classesSorted();
-  if (textarea && document.activeElement !== textarea) textarea.value = list.join(', ');
-  const chips = $('class-list-chips-v4');
-  if (chips) chips.innerHTML = list.map(k => `<span class="px-4 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 text-[10px] font-black uppercase tracking-widest">${k}</span>`).join('') || '<div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Belum ada kelas aktif.</div>';
-  const summary = $('class-list-summary-v4');
-  if (summary) summary.textContent = list.length ? `${list.length} kelas aktif • ${list.join(' • ')}` : 'Belum ada kelas aktif.';
-}
-
-function classListBlockersV4(nextList){
-  const nextSet = new Set(nextList);
-  const removed = classesSorted().filter(k => !nextSet.has(k));
-  const blockers = [];
-  removed.forEach(k => {
-    if ((localDB[k] || []).length) blockers.push(`Siswa masih ada di ${k}`);
-  });
-  accountsDB.forEach(acc => {
-    if (acc.role === 'guru') {
-      const mengajarBad = (acc.mengajar || []).filter(k => removed.includes(k));
-      if (mengajarBad.length) blockers.push(`Guru ${acc.displayName || acc.username} masih mengajar ${mengajarBad.join(', ')}`);
-      if (acc.isWaliKelas && acc.waliKelas && removed.includes(acc.waliKelas)) blockers.push(`Guru ${acc.displayName || acc.username} masih wali ${acc.waliKelas}`);
-    }
-    if (acc.role === 'orangtua' && acc.kelas && removed.includes(acc.kelas)) blockers.push(`Orang tua ${acc.displayName || acc.username} masih terhubung ke ${acc.kelas}`);
-  });
-  (teacherAttendanceDB || []).forEach(sess => {
-    if (sess?.kelas && removed.includes(sess.kelas)) blockers.push(`Riwayat pelajaran masih ada di ${sess.kelas}`);
-  });
-  return Array.from(new Set(blockers));
-}
-
-async function saveClassListFromAdminV4(){
-  if (session.role !== 'admin') return toast('Hanya admin yang bisa mengatur kelas.');
-  const input = $('set-class-list')?.value || '';
-  const nextList = parseClassListInputV4(input);
-  if (!nextList.length) return toast('Isi minimal 1 kelas.');
-  const blockers = classListBlockersV4(nextList);
-  if (blockers.length) return toast(`Tidak bisa menyimpan kelas. Perbaiki dulu: ${blockers.slice(0, 3).join(' | ')}`);
-  const removed = classesSorted().filter(k => !nextList.includes(k));
-  applyClassListV4(nextList, { saveCache: true, dropRemovedLocal: true });
-  removed.forEach(k => { if (unsubscribers[k]) { try { unsubscribers[k](); } catch {} delete unsubscribers[k]; } });
-  for (const kelas of classesSorted()) await subscribeToKelas(kelas);
-  populateAccountClassSelect();
-  populateStudentClassSelects();
-  syncClassManagerUiV4();
-  renderAll();
-  try {
-    setLoading(true, 'Menyimpan daftar kelas...');
-    const db = firebase.firestore();
-    settings.classList = classesSorted();
-    await db.collection('settings').doc('global').set(settings, { merge: true });
-    toast('Daftar kelas berhasil disimpan.');
-  } catch (e) {
-    toast('Gagal simpan daftar kelas: ' + e.message);
-  } finally {
-    setLoading(false);
-  }
-}
-
-function getStudentFormPayloadV4(){
-  const editNik = normalizeNik($('student-edit-nik')?.value || '');
-  const nik = normalizeNik($('student-nik')?.value || '');
-  const nisn = String($('student-nisn')?.value || '').trim();
-  const nis = String($('student-nis')?.value || '').trim();
-  const nama = String($('student-nama')?.value || '').trim();
-  const kelas = normalizeClassTokenV4($('student-kelas')?.value || '');
-  const jenis = String($('student-jenis')?.value || 'L').trim() || 'L';
-  const agama = String($('student-agama')?.value || 'Islam').trim() || 'Islam';
-  return { editNik, nik, nisn, nis, nama, kelas, jenis, agama };
-}
-
-function previewStudentQrV4(){
-  const { editNik, nik, nama, kelas, jenis, agama } = getStudentFormPayloadV4();
-  const activeNik = editNik || nik;
-  if (!activeNik || !nama || !kelas) return toast('Isi NIK, nama, dan kelas dulu untuk preview QR.');
-  const saved = findStudentByNik(activeNik);
-  const absen = saved?.Absen || nextAbsenForClass(kelas);
-  renderSingleQR($('admin-student-qr-result'), { nama: saved?.Nama || nama, kelas: saved?.Kelas || kelas, absen, jk: saved?.Jenis || saved?.JK || jenis, agama: saved?.Agama || agama, nik: saved?.NIK || activeNik });
-}
-
-async function exportClassQrZipV4(){
-  const kelas = adminStudentSelectedClass();
-  if (!kelas) return toast('Belum ada kelas aktif.');
-  const students = sortStudentsAlpha(localDB[kelas] || []);
-  if (!students.length) return toast(`Belum ada siswa di kelas ${kelas}.`);
-  const blob = await buildQrZipForStudents(students, `QR_SISWA_${kelas}_${todayId().replace(/\//g,'-')}`);
-  if (blob) downloadBlobFile(blob, `QR_SISWA_${kelas}_${todayId().replace(/\//g,'-')}.zip`);
-}
-
-function studentFormReset(){
-  if ($('student-form-title')) $('student-form-title').textContent = 'Tambah Data Siswa';
-  if ($('student-nik')) $('student-nik').readOnly = false;
-  ['student-edit-nik', 'student-nik', 'student-nisn', 'student-nis', 'student-nama', 'student-agama'].forEach(id => { if ($(id)) $(id).value = id === 'student-agama' ? 'Islam' : ''; });
-  if ($('student-kelas')) $('student-kelas').value = adminStudentSelectedClass() || '';
-  if ($('student-jenis')) $('student-jenis').value = 'L';
-  if ($('admin-student-qr-result')) $('admin-student-qr-result').innerHTML = '';
-}
-
-async function saveStudentForm(){
-  const { editNik, nik, nisn, nis, nama, kelas, jenis, agama } = getStudentFormPayloadV4();
-  if (!nik || !nama || !kelas) return toast('NIK, nama, dan kelas wajib diisi.');
-  if (!classesSorted().includes(kelas)) return toast('Kelas siswa belum ada di tab Kelas.');
-  setLoading(true, 'Menyimpan data siswa...');
-  try {
-    const saved = await upsertStudentFromAdminForm({ nik: editNik || nik, nisn, nis, nama, kelas, jenis, agama });
-    studentFormReset();
-    if ($('admin-student-class-picker')) $('admin-student-class-picker').value = kelas;
-    if (saved) renderSingleQR($('admin-student-qr-result'), { nama: saved.Nama, kelas: saved.Kelas, absen: saved.Absen, jk: saved.Jenis || saved.JK, agama: saved.Agama, nik: saved.NIK });
-    renderAll();
-    toast('Data siswa berhasil disimpan.');
-  } catch (e) {
-    toast(e.message || 'Gagal simpan siswa.');
-  } finally {
-    setLoading(false);
-  }
-}
-
-function previewStudentQrByNikV4(nik){
-  const s = findStudentByNik(nik);
-  if (!s) return toast('Siswa tidak ditemukan.');
-  renderSingleQR($('admin-student-qr-result'), { nama: s.Nama, kelas: s.Kelas, absen: s.Absen, jk: s.Jenis || s.JK, agama: s.Agama, nik: s.NIK });
-  setRoleTab('view-admin-students');
-}
-
-function renderAdminStudentList(){
-  const box = $('admin-student-list'); if (!box) return;
-  const kelas = adminStudentSelectedClass();
-  if (!kelas) {
-    box.innerHTML = '<div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Belum ada kelas aktif. Tambahkan dulu di tab Kelas.</div>';
-    setText('admin-student-summary', 'Belum ada kelas aktif');
-    return;
-  }
-  let arr = sortStudentsAlpha(localDB[kelas] || []);
-  const q = String($('admin-student-search')?.value || '').toLowerCase().trim();
-  if (q) arr = arr.filter(s => `${s.Nama} ${s.NIK} ${s.NISN} ${s.NIS}`.toLowerCase().includes(q));
-  setText('admin-student-summary', `${kelas} • ${arr.length} siswa`);
-  box.innerHTML = arr.map((s, idx) => `
-    <div class="glass p-4 rounded-[1.5rem] flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-      <div>
-        <div class="text-xs font-black text-white uppercase">${idx + 1}. ${safeUpper(s.Nama)}</div>
-        <div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">ABSEN ${s.Absen || '-'} • NIK ${s.NIK || '-'} • NISN ${s.NISN || '-'} • NIS ${s.NIS || '-'} • ${s.Jenis || s.JK || '-'} • ${s.Agama || '-'}</div>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <button class="admin-student-qr-btn px-4 py-2 rounded-xl border border-emerald-500/30 text-emerald-300 text-[10px] font-black uppercase tracking-widest" data-nik="${s.NIK || ''}">QR</button>
-        <button class="admin-edit-student-btn px-4 py-2 rounded-xl border border-cyan-500/30 text-cyan-300 text-[10px] font-black uppercase tracking-widest" data-nik="${s.NIK || ''}">Edit</button>
-      </div>
-    </div>`).join('') || '<div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Belum ada siswa di kelas ini.</div>';
-  box.querySelectorAll('.admin-edit-student-btn').forEach(btn => btn.onclick = () => startEditStudentFromAdmin(btn.dataset.nik));
-  box.querySelectorAll('.admin-student-qr-btn').forEach(btn => btn.onclick = () => previewStudentQrByNikV4(btn.dataset.nik));
-}
-
-function renderPicketScheduleAdmin(){
-  const wrap = $('picket-schedule-wrap');
-  if (!wrap) return;
-  const teachers = teachersForScheduling().sort((a, b) => String(a.displayName || a.username).localeCompare(String(b.displayName || b.username), 'id', { sensitivity: 'base' }));
-  const query = String($('picket-teacher-search-v4')?.value || '').toLowerCase().trim();
-  const filtered = !query ? teachers : teachers.filter(t => `${t.displayName || ''} ${t.username || ''} ${(t.mengajar || []).join(' ')}`.toLowerCase().includes(query));
-  if (!selectedPicketTeacherV4 || !teachers.some(t => t.username === selectedPicketTeacherV4)) selectedPicketTeacherV4 = teachers[0]?.username || null;
-  const selected = teachers.find(t => t.username === selectedPicketTeacherV4) || null;
-  const days = ['senin','selasa','rabu','kamis','jumat','sabtu'];
-  wrap.innerHTML = `
-    <div class="grid lg:grid-cols-[1.1fr,1.6fr] gap-6">
-      <div class="glass p-5 rounded-[1.75rem]">
-        <div class="text-[10px] uppercase tracking-widest text-yellow-300 font-black">Pilih Guru</div>
-        <input id="picket-teacher-search-v4" class="mt-3 w-full bg-gray-900 border border-gray-800 p-4 rounded-2xl outline-none text-white" placeholder="Cari nama guru..." value="${String($('picket-teacher-search-v4')?.value || '').replace(/"/g, '&quot;')}"/>
-        <div id="picket-teacher-list-v4" class="mt-4 space-y-2 max-h-[420px] overflow-y-auto pr-2"></div>
-      </div>
-      <div class="glass p-5 rounded-[1.75rem]">
-        <div class="text-[10px] uppercase tracking-widest text-yellow-300 font-black">Hari Piket</div>
-        <div id="picket-selected-teacher-v4" class="mt-3 text-xs font-black uppercase text-white">${selected ? safeUpper(selected.displayName || selected.username) : '-'}</div>
-        <div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-2">${selected ? `Mengajar ${((selected.mengajar || []).join(', ') || '-')}${selected.isWaliKelas && selected.waliKelas ? ` • Wali ${selected.waliKelas}` : ''}` : 'Belum ada akun guru.'}</div>
-        <div id="picket-day-buttons-v4" class="mt-5 flex flex-wrap gap-2"></div>
-      </div>
-    </div>`;
-  const teacherList = $('picket-teacher-list-v4');
-  if (teacherList) {
-    teacherList.innerHTML = filtered.map(t => `
-      <button type="button" class="w-full text-left px-4 py-3 rounded-2xl border ${t.username === selectedPicketTeacherV4 ? 'border-yellow-500 bg-yellow-500/10 text-yellow-100' : 'border-gray-800 bg-gray-900/50 text-gray-200 hover:border-yellow-500/40'}" data-picket-teacher="${t.username}">
-        <div class="text-[10px] uppercase tracking-widest font-black">${safeUpper(t.displayName || t.username)}</div>
-        <div class="text-[9px] uppercase tracking-widest text-gray-500 font-bold mt-1">${(t.mengajar || []).join(', ') || '-'}${t.isWaliKelas && t.waliKelas ? ` • WALI ${t.waliKelas}` : ''}</div>
-      </button>`).join('') || '<div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Belum ada akun guru.</div>';
-    teacherList.querySelectorAll('[data-picket-teacher]').forEach(btn => btn.onclick = () => { selectedPicketTeacherV4 = btn.dataset.picketTeacher; renderPicketScheduleAdmin(); });
-  }
-  $('picket-teacher-search-v4') && ($('picket-teacher-search-v4').oninput = () => renderPicketScheduleAdmin());
-  const dayWrap = $('picket-day-buttons-v4');
-  if (dayWrap) {
-    if (!selected) {
-      dayWrap.innerHTML = '<div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">Pilih guru dulu.</div>';
-    } else {
-      dayWrap.innerHTML = days.map(day => {
-        const active = (picketScheduleDB?.[day] || []).includes(selected.username);
-        return `<button type="button" class="picket-day-toggle-v4 px-4 py-3 rounded-2xl border text-[10px] font-black uppercase tracking-widest ${active ? 'border-yellow-500 bg-yellow-500/20 text-yellow-100' : 'border-gray-700 text-gray-300 hover:border-yellow-500/40'}" data-day="${day}">${day}</button>`;
-      }).join('');
-      dayWrap.querySelectorAll('.picket-day-toggle-v4').forEach(btn => btn.onclick = () => {
-        const day = btn.dataset.day;
-        if (!selected) return;
-        picketScheduleDB = picketScheduleDB || emptyPicketSchedule();
-        const current = new Set(picketScheduleDB[day] || []);
-        if (current.has(selected.username)) current.delete(selected.username); else current.add(selected.username);
-        picketScheduleDB[day] = Array.from(current).sort();
-        savePicketScheduleCache();
-        renderPicketScheduleAdmin();
-      });
-    }
-  }
-}
-
-async function savePicketScheduleFromForm(){
-  if (session.role !== 'admin') return toast('Hanya admin yang bisa atur jadwal piket.');
-  picketScheduleDB = picketScheduleDB || emptyPicketSchedule();
-  savePicketScheduleCache();
-  setLoading(true, 'Menyimpan jadwal piket...');
-  try {
-    await savePicketScheduleToFirestore();
-    session.piketToday = isScheduledPicketToday(session.username);
-    showRoleView();
-    toast('Jadwal piket berhasil disimpan.');
-  } catch (e) {
-    toast('Gagal simpan jadwal piket: ' + e.message);
-  } finally {
-    setLoading(false);
-  }
-}
-
-function fillPiketDispenSelectors(){
-  const selK = $('piket-dp-kelas');
-  const selN = $('piket-dp-nama');
-  if (!selK || !selN) return;
-  const classes = classesSorted();
-  const current = normalizeClassTokenV4(selK.value || '');
-  selK.innerHTML = classes.map(k => `<option value="${k}">${k}</option>`).join('');
-  if (current && classes.includes(current)) selK.value = current;
-  else if (classes[0]) selK.value = classes[0];
-  selK.onchange = () => {
-    const k = selK.value;
-    const list = (localDB[k] || []).slice().sort((a, b) => Number(a.Absen) - Number(b.Absen));
-    selN.innerHTML = list.map(s => `<option value="${s.Absen}">${s.Absen} - ${safeUpper(s.Nama)}</option>`).join('');
-  };
-  if (classes.length) selK.dispatchEvent(new Event('change'));
-  else selN.innerHTML = '';
-}
-
-function isAdminTopRoleTab(tabId){
-  return ['view-admin','view-admin-accounts','view-admin-students','view-admin-classes','view-admin-schedule','view-admin-settings'].includes(tabId);
-}
-function adminRoleTabToPanel(tabId){
-  switch (tabId) {
-    case 'view-admin-accounts': return 'admin-panel-accounts';
-    case 'view-admin-students': return 'admin-panel-students';
-    case 'view-admin-classes': return 'admin-panel-classes';
-    case 'view-admin-schedule': return 'admin-panel-schedule';
-    case 'view-admin-settings': return 'admin-panel-settings';
-    case 'view-admin':
-    default: return 'admin-panel-overview';
-  }
-}
-function adminPanelToRoleTab(panelId){
-  switch (panelId) {
-    case 'admin-panel-accounts': return 'view-admin-accounts';
-    case 'admin-panel-students': return 'view-admin-students';
-    case 'admin-panel-classes': return 'view-admin-classes';
-    case 'admin-panel-schedule': return 'view-admin-schedule';
-    case 'admin-panel-settings': return 'view-admin-settings';
-    case 'admin-panel-overview':
-    default: return 'view-admin';
-  }
-}
-function getAvailableRoleTabs(){
-  if (!session.role) return [];
-  if (session.role === 'admin') {
-    return [
-      { id: 'view-admin', label: 'Admin' },
-      { id: 'view-admin-accounts', label: 'Akun Guru' },
-      { id: 'view-admin-students', label: 'Data Siswa' },
-      { id: 'view-admin-classes', label: 'Atur Kelas' },
-      { id: 'view-admin-schedule', label: 'Jadwal Piket' },
-      { id: 'view-admin-settings', label: 'Pengaturan' },
-      { id: 'view-piket', label: 'Piket' }
-    ];
-  }
-  const tabs = [];
-  if (session.role === 'guru') {
-    tabs.push({ id: 'view-profile', label: 'Profile' });
-    tabs.push({ id: 'view-pelajaran', label: 'Pelajaran' });
-    if (session.isWaliKelas) tabs.push({ id: 'view-wali', label: 'Wali Kelas' });
-    if (session.piketToday) tabs.push({ id: 'view-piket', label: 'Piket' });
-  } else if (session.role === 'orangtua') {
-    tabs.push({ id: 'view-ortu', label: 'Orang Tua' });
-  }
-  return tabs;
-}
-
-function startEditStudentFromAdmin(nik){
-  const s = findStudentByNik(nik); if (!s) return toast('Siswa tidak ditemukan.');
-  if ($('student-form-title')) $('student-form-title').textContent = 'Edit Data Siswa';
-  if ($('student-edit-nik')) $('student-edit-nik').value = s.NIK || '';
-  if ($('student-nik')) $('student-nik').value = s.NIK || '';
-  if ($('student-nisn')) $('student-nisn').value = s.NISN || '';
-  if ($('student-nis')) $('student-nis').value = s.NIS || '';
-  if ($('student-nama')) $('student-nama').value = s.Nama || '';
-  if ($('student-kelas')) $('student-kelas').value = s.Kelas || adminStudentSelectedClass();
-  if ($('student-jenis')) $('student-jenis').value = s.Jenis || s.JK || 'L';
-  if ($('student-agama')) $('student-agama').value = s.Agama || 'Islam';
-  if ($('student-nik')) $('student-nik').readOnly = true;
-  renderSingleQR($('admin-student-qr-result'), { nama: s.Nama, kelas: s.Kelas, absen: s.Absen, jk: s.Jenis || s.JK, agama: s.Agama, nik: s.NIK });
-  setRoleTab('view-admin-students');
-}
-
-function updatePelajaranClockV4(){
-  const now = new Date();
-  const badge = $('pelajaran-now-info');
-  if (badge) badge.textContent = now.toLocaleString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-function currentOpenLessonSessionV4(){
-  const sess = currentLessonSession();
-  return sess && !sess.endedAt ? sess : null;
-}
-
-async function startLessonSession(){
-  if (!teacherCanUsePelajaran()) return toast('Akses tab pelajaran ditolak.');
-  const kelas = currentSelectedLessonClass();
-  if (!kelas) return toast('Pilih kelas dulu.');
-  const open = currentOpenLessonSessionV4();
-  if (open && open.kelas === kelas) return toast(`Absensi ${kelas} masih aktif.`);
-  const now = Date.now();
-  const doc = {
-    id: newLessonSessionId(),
-    date: teacherLessonDateId(),
-    teacherUsername: session.username,
-    teacherName: session.displayName || session.username,
-    kelas,
-    createdAt: now,
-    startedAtText: new Date(now).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-    endedAt: null,
-    records: {}
-  };
-  teacherAttendanceDB.push(doc);
-  currentLessonSessionId = doc.id;
-  saveTeacherAttendanceCache();
-  await upsertTeacherSessionToFirestore(doc);
-  renderAll();
-  toast(`Absensi kelas ${kelas} dimulai.`);
-}
-
-async function stopLessonSessionV4(){
-  const active = currentOpenLessonSessionV4();
-  if (!active) return toast('Belum ada absensi kelas yang aktif.');
-  active.endedAt = Date.now();
-  active.endedAtText = new Date(active.endedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  saveTeacherAttendanceCache();
-  await upsertTeacherSessionToFirestore(active);
-  renderAll();
-  toast(`Absensi kelas ${active.kelas} dihentikan.`);
-}
-
-async function markLessonAttendance({ kelas, absen, status, source = 'MANUAL' }){
-  const active = currentOpenLessonSessionV4();
-  if (!active) return { ok: false, msg: 'Mulai absensi kelas dulu.' };
-  if (active.kelas !== kelas) return { ok: false, msg: `Absensi aktif untuk ${active.kelas}, bukan ${kelas}.` };
-  const student = (localDB[kelas] || []).find(s => normalizeAbsen(s.Absen) === normalizeAbsen(absen));
-  if (!student) return { ok: false, msg: 'Siswa tidak ditemukan.' };
-  active.records[normalizeAbsen(absen)] = {
-    Nama: student.Nama,
-    Kelas: student.Kelas,
-    Absen: normalizeAbsen(student.Absen),
-    JK: student.JK || '-',
-    Agama: student.Agama || '-',
-    Status: status || 'HADIR',
-    Jam: nowTimeId(),
-    Tanggal: active.date,
-    Guru: active.teacherName,
-    Sumber: source
-  };
-  saveTeacherAttendanceCache();
-  upsertTeacherSessionToFirestore(active);
-  return { ok: true, student, msg: 'OK' };
-}
-
-function renderLessonTodaySessions(){
-  const el = $('pelajaran-session-list');
-  if (!el) return;
-  const list = teacherSessionsFor(session.username, teacherLessonDateId()).sort((a, b) => b.createdAt - a.createdAt);
-  if (!list.length) {
-    el.innerHTML = '<p class="text-center text-gray-500 py-8 text-[10px] uppercase font-bold">Belum ada absensi pelajaran hari ini.</p>';
-    return;
-  }
-  el.innerHTML = list.map(sess => {
-    const total = Object.keys(sess.records || {}).length;
-    const open = !sess.endedAt;
-    return `
-      <button class="lesson-session-item w-full text-left glass p-4 rounded-2xl hover:border-cyan-500/40 transition-all ${sess.id === currentLessonSessionId ? 'border border-cyan-500/40' : ''}" data-id="${sess.id}">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <div class="text-xs font-black text-white uppercase">${sess.kelas}</div>
-            <div class="text-[9px] text-gray-500 uppercase font-bold">${sess.date} • Mulai ${sess.startedAtText || new Date(sess.createdAt).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'})}${sess.endedAtText ? ` • Stop ${sess.endedAtText}` : ''} • ${total} siswa</div>
-          </div>
-          <div class="text-[10px] font-black uppercase tracking-widest ${open ? 'text-cyan-300' : 'text-gray-400'}">${open ? 'AKTIF' : 'SELESAI'}</div>
-        </div>
-      </button>`;
-  }).join('');
-  el.querySelectorAll('.lesson-session-item').forEach(btn => btn.onclick = () => {
-    currentLessonSessionId = btn.dataset.id;
-    const sess = currentLessonSession();
-    if (sess && $('pelajaran-kelas')) $('pelajaran-kelas').value = sess.kelas;
-    renderAll();
-  });
-}
-
-function renderPelajaranPanel(){
-  const wrap = $('view-pelajaran');
-  if (!wrap) return;
-  if (!teacherCanUsePelajaran()) { wrap.classList.add('hidden'); return; }
-  const sel = $('pelajaran-kelas');
-  const kelasOpts = availableClassesForTeacherV4();
-  if (sel) {
-    const current = normalizeClassTokenV4(sel.value || '');
-    sel.innerHTML = '<option value="">Pilih kelas...</option>' + kelasOpts.map(k => `<option value="${k}">${k}</option>`).join('');
-    if (current && kelasOpts.includes(current)) sel.value = current;
-    else if (kelasOpts[0]) sel.value = kelasOpts[0];
-  }
-  const selected = currentLessonSession();
-  const open = currentOpenLessonSessionV4();
-  const activeText = open
-    ? `Absensi aktif: ${open.kelas} • Mulai ${open.startedAtText || '-'} • ${Object.keys(open.records || {}).length} siswa`
-    : (selected && selected.endedAt
-        ? `Riwayat dipilih: ${selected.kelas} • Mulai ${selected.startedAtText || '-'} • Stop ${selected.endedAtText || '-'}`
-        : 'Belum ada absensi aktif. Pilih kelas lalu klik Mulai Absensi.');
-  setText('pelajaran-active-info', activeText);
-  const startBtn = $('btn-pelajaran-start-session');
-  const stopBtn = $('btn-pelajaran-stop-session');
-  if (startBtn) startBtn.classList.toggle('hidden', !!open);
-  if (stopBtn) stopBtn.classList.toggle('hidden', !open);
-  renderLessonTodaySessions();
-  renderLessonStudentList();
-  updatePelajaranClockV4();
-}
-
-function setupPelajaranUiV4(){
-  const section = $('view-pelajaran');
-  if (!section || section.dataset.v4Structured === '1') return;
-  const hero = section.querySelector(':scope > div.glass');
-  if (hero && !$('pelajaran-now-info')) {
-    const actionWrap = hero.querySelector(':scope > div.flex.items-start.justify-between.gap-4');
-    if (actionWrap) {
-      const right = actionWrap.lastElementChild;
-      const badge = document.createElement('div');
-      badge.id = 'pelajaran-now-info';
-      badge.className = 'py-4 px-4 rounded-2xl border border-cyan-500/20 text-cyan-200 text-[10px] font-black uppercase tracking-widest bg-cyan-500/10';
-      if (right) right.prepend(badge);
-    }
-  }
-  if (hero && !$('btn-pelajaran-stop-session')) {
-    const row = $('btn-pelajaran-start-session')?.parentElement;
-    if (row) {
-      const stopBtn = document.createElement('button');
-      stopBtn.id = 'btn-pelajaran-stop-session';
-      stopBtn.className = 'flex-1 py-4 bg-red-700 hover:bg-red-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest hidden';
-      stopBtn.textContent = 'Stop Absensi Kelas';
-      row.insertBefore(stopBtn, $('pelajaran-search'));
-    }
-  }
-  const grid = section.querySelector(':scope > div.grid.lg\\:grid-cols-2');
-  const scanPanel = grid?.children?.[0];
-  const rightPanel = grid?.children?.[1];
-  const historyList = $('pelajaran-session-list');
-  const historyBlock = historyList?.parentElement;
-  const manualList = $('pelajaran-student-list');
-  if (scanPanel && rightPanel && historyBlock && manualList && !section.dataset.v4Swapped) {
-    const manualSection = document.createElement('div');
-    manualSection.className = 'mt-4';
-    manualSection.innerHTML = `<div class="flex items-center justify-between"><h4 class="text-xs font-black uppercase tracking-widest text-gray-200">Absen Manual</h4><div class="text-[10px] text-gray-400 font-black uppercase tracking-widest">Hadir / Alpa / Sakit / Izin / Dispen</div></div>`;
-    manualSection.appendChild(manualList);
-    historyBlock.replaceWith(manualSection);
-    rightPanel.innerHTML = `<div class="flex items-center justify-between"><h3 class="text-sm font-black text-white uppercase tracking-widest italic">Riwayat Absensi</h3><div class="text-[10px] text-gray-400 font-black uppercase tracking-widest">Hari ini</div></div>`;
-    rightPanel.appendChild(historyBlock);
-    historyBlock.classList.add('mt-4');
-    section.dataset.v4Swapped = '1';
-  }
-  section.dataset.v4Structured = '1';
-  if (pelajaranClockTimerV4) clearInterval(pelajaranClockTimerV4);
-  pelajaranClockTimerV4 = setInterval(updatePelajaranClockV4, 1000);
-  updatePelajaranClockV4();
-}
-
-function setupWaliUiV4(){
-  setupWaliUi();
-  const section = $('view-wali');
-  if (!section || section.dataset.v4Swapped === '1') return;
-  const grid = section.querySelector(':scope > div.grid.lg\\:grid-cols-2');
-  const scanPanel = grid?.children?.[0];
-  const rightPanel = grid?.children?.[1];
-  const logList = $('wali-log');
-  const logBlock = logList?.parentElement;
-  const manualList = $('wali-manual-list');
-  const searchInput = $('wali-manual-search');
-  if (scanPanel && rightPanel && logBlock && manualList && searchInput) {
-    const manualSection = document.createElement('div');
-    manualSection.className = 'mt-4';
-    manualSection.innerHTML = `<div class="flex items-center justify-between"><h4 class="text-xs font-black uppercase tracking-widest text-gray-200">Absen Manual</h4><div class="text-[10px] text-gray-400 font-black uppercase tracking-widest">Klik siswa → pilih aksi</div></div>`;
-    manualSection.appendChild(searchInput);
-    searchInput.classList.remove('mt-4');
-    searchInput.classList.add('mt-3');
-    manualSection.appendChild(manualList);
-    logBlock.replaceWith(manualSection);
-    rightPanel.innerHTML = `<div class="flex items-center justify-between"><h3 class="text-sm font-black text-white uppercase tracking-widest italic">Riwayat Absensi</h3><div class="text-[10px] text-gray-400 font-black uppercase tracking-widest">Kelas wali</div></div>`;
-    rightPanel.appendChild(logBlock);
-    logBlock.classList.add('mt-4');
-  }
-  section.dataset.v4Swapped = '1';
-}
-
-function bindPatchedEvents(){
-  if ($('btn-student-save')) $('btn-student-save').onclick = saveStudentForm;
-  if ($('btn-student-form-reset')) $('btn-student-form-reset').onclick = studentFormReset;
-  if ($('btn-student-export-excel')) $('btn-student-export-excel').onclick = exportStudentExcel;
-  if ($('btn-student-preview-qr')) $('btn-student-preview-qr').onclick = previewStudentQrV4;
-  if ($('btn-student-export-qr-class')) $('btn-student-export-qr-class').onclick = exportClassQrZipV4;
-  if ($('admin-student-class-picker')) $('admin-student-class-picker').onchange = renderAdminStudentList;
-  if ($('admin-student-search')) $('admin-student-search').oninput = renderAdminStudentList;
-  if ($('acc-role')) $('acc-role').onchange = toggleAccountFieldVisibility;
-  if ($('acc-is-wali')) $('acc-is-wali').onchange = renderAccountClassPickersV4;
-  if ($('btn-save-class-list')) $('btn-save-class-list').onclick = saveClassListFromAdminV4;
-  if ($('btn-class-list-refresh')) $('btn-class-list-refresh').onclick = syncClassManagerUiV4;
-  if ($('btn-class-list-reset-default')) $('btn-class-list-reset-default').onclick = () => { if ($('set-class-list')) $('set-class-list').value = DEFAULT_CLASS_LIST_V4.join(', '); };
-  if ($('btn-pelajaran-stop-session')) $('btn-pelajaran-stop-session').onclick = stopLessonSessionV4;
-}
-
-const __v3SubscribeToAllClasses = subscribeToAllClasses;
-subscribeToAllClasses = async function(){
-  Object.keys(unsubscribers).forEach(key => {
-    if (key === 'settings' || key === 'dailyEvents') return;
-    if (!DAFTAR_KELAS.includes(key) && typeof unsubscribers[key] === 'function') {
-      try { unsubscribers[key](); } catch {}
-      delete unsubscribers[key];
-    }
-  });
-  for (const kelas of DAFTAR_KELAS) await subscribeToKelas(kelas);
-  const db = firebase.firestore();
-  if (unsubscribers.settings) unsubscribers.settings();
-  unsubscribers.settings = db.collection('settings').doc('global').onSnapshot(async (doc) => {
-    if (!doc.exists) return;
-    const data = doc.data() || {};
-    const nextList = parseClassListInputV4(Array.isArray(data.classList) && data.classList.length ? data.classList : DAFTAR_KELAS);
-    const changed = !classListsEqualV4(nextList, currentClassListV4());
-    settings = { ...settings, ...data, classList: nextList };
-    if (changed) {
-      applyClassListV4(nextList, { saveCache: true, dropRemovedLocal: true });
-      Object.keys(unsubscribers).forEach(key => {
-        if (key === 'settings' || key === 'dailyEvents') return;
-        if (!DAFTAR_KELAS.includes(key) && typeof unsubscribers[key] === 'function') {
-          try { unsubscribers[key](); } catch {}
-          delete unsubscribers[key];
-        }
-      });
-      for (const kelas of DAFTAR_KELAS) await subscribeToKelas(kelas);
-    }
-    if ($('set-late')) $('set-late').value = settings.lateCutoff;
-    if ($('set-alpa')) $('set-alpa').value = settings.alpaCutoff;
-    populateAccountClassSelect();
-    populateStudentClassSelects();
-    syncClassManagerUiV4();
-    renderAll();
-  });
-  await subscribeToDailyEvents(todayId());
-};
-
-async function saveSettingsToFirestore(){
-  if (session.role !== 'admin') return toast('Akses ditolak.');
-  settings.lateCutoff = $('set-late')?.value || settings.lateCutoff;
-  settings.alpaCutoff = $('set-alpa')?.value || settings.alpaCutoff;
-  settings.classList = classesSorted();
-  try {
-    const db = firebase.firestore();
-    await db.collection('settings').doc('global').set(settings, { merge: true });
-    persistClassListCacheV4(settings.classList);
-    toast('Pengaturan tersimpan ✅');
-  } catch (e) {
-    console.error(e);
-    toast('Gagal simpan settings.');
-  }
-}
-
-const __v3RenderAll = renderAll;
-renderAll = function(){
-  __v3RenderAll();
-  populateAccountClassSelect();
-  populateStudentClassSelects();
-  renderAccountClassPickersV4();
-  syncClassManagerUiV4();
-  updatePelajaranClockV4();
-};
-
-const __v3InitPatched = init;
-init = async function(){
-  const cached = restoreClassListCacheV4();
-  if (cached && cached.length) applyClassListV4(cached, { saveCache: true });
-  try {
-    const db = firebase.firestore();
-    const settingsDoc = await db.collection('settings').doc('global').get();
-    if (settingsDoc.exists) {
-      const data = settingsDoc.data() || {};
-      settings = { ...settings, ...data };
-      if (Array.isArray(data.classList) && data.classList.length) applyClassListV4(data.classList, { saveCache: true });
-    }
-  } catch (e) {
-    console.warn('Prefetch class list gagal', e);
-  }
-  await __v3InitPatched();
-  setupAdminUiV4();
-  setupPelajaranUiV4();
-  setupWaliUiV4();
-  ensureAccountClassUiV4();
-  populateAccountClassSelect();
-  populateStudentClassSelects();
-  syncClassManagerUiV4();
-  bindPatchedEvents();
-  renderAll();
-};
 window.onload = init;
 
-/* ===================== PATCH V4 SESSION SYNC ===================== */
-function syncSessionFromAccountsV4(){
-  if (!session?.username) return;
-  const fresh = findAccountByUsername(session.username);
-  if (!fresh) return;
-  session.displayName = fresh.displayName || fresh.username || session.displayName;
-  session.nip = fresh.nip || null;
-  session.mengajar = Array.isArray(fresh.mengajar) ? fresh.mengajar.slice() : [];
-  session.isWaliKelas = !!fresh.isWaliKelas;
-  session.waliKelas = fresh.waliKelas || null;
-  session.kelas = fresh.role === 'orangtua' ? (fresh.kelas || null) : (fresh.isWaliKelas ? (fresh.waliKelas || null) : null);
-  session.parentAbsen = fresh.parentAbsen || null;
-  session.parentPhone = fresh.parentPhone || null;
-  session.piketToday = isScheduledPicketToday(session.username);
-}
-const __v4RenderAllBase = renderAll;
-renderAll = function(){
-  syncSessionFromAccountsV4();
-  __v4RenderAllBase();
-};
-
-/* ===================== PATCH V4 PARSER FIX ===================== */
-function parseClassListInputV4(text){
-  const source = Array.isArray(text) ? text : String(text || '').split(/[\n,;]+/);
-  const cleaned = source.map(normalizeClassTokenV4).filter(Boolean);
-  return sortClassNamesV4(cleaned);
-}
-function classListOrDefaultV4(text){
-  const parsed = parseClassListInputV4(text);
-  return parsed.length ? parsed : sortClassNamesV4(DEFAULT_CLASS_LIST_V4);
-}
-function restoreClassListCacheV4(){
-  try {
-    const raw = localStorage.getItem(CLASS_LIST_STORAGE_KEY_V4);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    const list = parseClassListInputV4(Array.isArray(parsed) ? parsed : []);
-    return list.length ? list : null;
-  } catch {
-    return null;
-  }
-}
-function applyClassListV4(list, { saveCache = true, dropRemovedLocal = false } = {}){
-  const next = classListOrDefaultV4(list);
-  if (!next.length) return currentClassListV4();
-  DAFTAR_KELAS.splice(0, DAFTAR_KELAS.length, ...next);
-  settings.classList = next.slice();
-  ensureBuckets();
-  if (dropRemovedLocal) {
-    Object.keys(localDB || {}).forEach(k => {
-      if (!DAFTAR_KELAS.includes(k)) delete localDB[k];
-    });
-  }
-  if (saveCache) persistClassListCacheV4(next);
-  return next;
-}
-function selectedMengajarClassesV4(){
-  const raw = String($('acc-guru-mengajar')?.value || '');
-  return parseClassListInputV4(raw).filter(k => classesSorted().includes(k));
-}
-
-/* ===================== PATCH V4 LESSON ACTIVE FIX ===================== */
-function currentOpenLessonSessionV4(){
-  const selected = currentLessonSession();
-  if (selected && !selected.endedAt) return selected;
-  const openList = teacherSessionsFor(session.username, teacherLessonDateId()).filter(sess => !sess.endedAt).sort((a, b) => b.createdAt - a.createdAt);
-  return openList[0] || null;
-}
-function renderLessonStudentList(){
-  const el = $('pelajaran-student-list');
-  if (!el) return;
-  const open = currentOpenLessonSessionV4();
-  const selected = currentLessonSession();
-  const basis = open || selected || null;
-  const kelas = basis?.kelas || currentSelectedLessonClass();
-  if (!kelas) {
-    el.innerHTML = '<p class="text-center text-gray-500 py-8 text-[10px] uppercase font-bold">Pilih kelas lalu mulai absensi.</p>';
-    return;
-  }
-  const query = String($('pelajaran-search')?.value || '').trim().toLowerCase();
-  let students = (localDB[kelas] || []).slice().sort((a, b) => Number(a.Absen) - Number(b.Absen));
-  if (query) students = students.filter(s => `${s.Nama} ${s.Absen}`.toLowerCase().includes(query));
-  if (!students.length) {
-    el.innerHTML = '<p class="text-center text-gray-500 py-8 text-[10px] uppercase font-bold">Belum ada siswa di kelas ini.</p>';
-    return;
-  }
-  const activeRecords = basis?.records || {};
-  const locked = !open;
-  el.innerHTML = students.map(s => {
-    const rec = activeRecords[normalizeAbsen(s.Absen)];
-    const status = rec?.Status || '-';
-    const mkBtn = (st, label, cls) => `<button class="lesson-mark-btn ${cls} ${locked ? 'opacity-50 cursor-not-allowed' : ''}" data-absen="${s.Absen}" data-status="${st}" ${locked ? 'disabled' : ''}>${label}</button>`;
-    return `
-      <div class="glass p-4 rounded-2xl">
-        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <div>
-            <div class="text-xs font-black text-white uppercase">${safeUpper(s.Nama)}</div>
-            <div class="text-[9px] text-gray-500 uppercase font-bold">${kelas} • ABSEN ${s.Absen} • STATUS: <span class="text-cyan-300">${status}</span></div>
-          </div>
-          <div class="flex flex-wrap gap-2">
-            ${mkBtn('HADIR','Hadir','bg-emerald-700 hover:bg-emerald-600')}
-            ${mkBtn('ALPA','Alpa','bg-red-700 hover:bg-red-600')}
-            ${mkBtn('SAKIT','Sakit','bg-yellow-700 hover:bg-yellow-600')}
-            ${mkBtn('IZIN','Izin','bg-blue-700 hover:bg-blue-600')}
-            ${mkBtn('DISPEN','Dispen','bg-purple-700 hover:bg-purple-600')}
-          </div>
-        </div>
-      </div>`;
-  }).join('') + (locked ? '<div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold mt-4">Manual terkunci karena tidak ada absensi kelas yang aktif.</div>' : '');
-  el.querySelectorAll('.lesson-mark-btn').forEach(btn => btn.onclick = async () => {
-    const res = await markLessonAttendance({ kelas, absen: btn.getAttribute('data-absen'), status: btn.getAttribute('data-status'), source: 'MANUAL' });
-    if (!res.ok) return toast(res.msg);
-    renderAll();
-  });
-}
-
-/* ===================== PATCH V5 ATTENDANCE FLOW + ALPHABETICAL ABSEN ===================== */
-let accountRepairDirtyV5 = false;
-
-function compareStudentNameV5(a, b){
-  const nameA = String(a?.Nama || '').trim();
-  const nameB = String(b?.Nama || '').trim();
-  return nameA.localeCompare(nameB, 'id', { sensitivity: 'base' })
-    || String(a?.NISN || '').trim().localeCompare(String(b?.NISN || '').trim(), 'id', { sensitivity: 'base' })
-    || String(a?.NIS || '').trim().localeCompare(String(b?.NIS || '').trim(), 'id', { sensitivity: 'base' })
-    || normalizeNik(a?.NIK).localeCompare(normalizeNik(b?.NIK))
-    || String(a?.NoHP || '').trim().localeCompare(String(b?.NoHP || '').trim(), 'id', { sensitivity: 'base' });
-}
-
-function sortStudentsAlpha(arr){
-  return (arr || []).slice().sort(compareStudentNameV5);
-}
-
-function studentIdentityKeyV5(student){
-  const nik = normalizeNik(student?.NIK);
-  if (nik) return `NIK:${nik}`;
-  const nisn = String(student?.NISN || '').trim();
-  if (nisn && nisn !== '-') return `NISN:${nisn}`;
-  const nis = String(student?.NIS || '').trim();
-  if (nis && nis !== '-') return `NIS:${nis}`;
-  return `FALLBACK:${String(student?.Nama || '').trim().toLowerCase()}|${String(student?.Kelas || '').trim().toUpperCase()}|${String(student?.JK || student?.Jenis || '').trim().toUpperCase()}`;
-}
-
-function normalizeAccount(acc){
-  const allClasses = classesSorted();
-  const out = {
-    username: String(acc?.username || '').trim(),
-    password: String(acc?.password || ''),
-    role: String(acc?.role || '').trim(),
-    kelas: acc?.kelas ? normalizeClassTokenV4(acc.kelas) : null,
-    displayName: String(acc?.displayName || acc?.username || '').trim(),
-    nip: String(acc?.nip || '').trim(),
-    mengajar: (Array.isArray(acc?.mengajar) ? acc.mengajar : String(acc?.mengajar || '').split(/[;,\n]+/)).map(normalizeClassTokenV4).filter(k => allClasses.includes(k)),
-    parentAbsen: acc?.parentAbsen ? normalizeAbsen(acc.parentAbsen) : null,
-    parentPhone: acc?.parentPhone ? normalizePhone(acc.parentPhone) : null,
-    parentStudentNik: acc?.parentStudentNik ? normalizeNik(acc.parentStudentNik) : null,
-    isWaliKelas: !!(acc?.isWaliKelas || acc?.waliKelas?.enabled),
-    waliKelas: acc?.waliKelas?.kelas ? normalizeClassTokenV4(acc.waliKelas.kelas) : (acc?.waliKelas ? normalizeClassTokenV4(acc.waliKelas) : null)
-  };
-  if (out.role !== 'guru') {
-    out.isWaliKelas = false;
-    out.waliKelas = null;
-    out.nip = '';
-    out.mengajar = [];
-  }
-  if (out.role === 'guru') {
-    if (out.waliKelas && !allClasses.includes(out.waliKelas)) out.waliKelas = null;
-    if (out.isWaliKelas && out.waliKelas && !out.mengajar.includes(out.waliKelas)) out.mengajar.push(out.waliKelas);
-    out.mengajar = sortClassNamesV4(out.mengajar);
-  }
-  if (out.role !== 'orangtua') {
-    out.kelas = null;
-    out.parentAbsen = null;
-    out.parentPhone = null;
-    out.parentStudentNik = null;
-  } else if (out.kelas && !allClasses.includes(out.kelas)) {
-    out.kelas = null;
-    out.parentAbsen = null;
-    out.parentStudentNik = null;
-  }
-  return out;
-}
-
-function getParentStudent(){
-  if (session.role !== 'orangtua') return null;
-  const fresh = findAccountByUsername(session.username) || session;
-  const kelas = normalizeClassName(fresh.kelas || session.kelas || '');
-  if (!kelas) return null;
-  const nik = normalizeNik(fresh.parentStudentNik || session.parentStudentNik || '');
-  if (nik) {
-    const byNik = (localDB[kelas] || []).find(s => normalizeNik(s.NIK) === nik);
-    if (byNik) return byNik;
-  }
-  const absen = normalizeAbsen(fresh.parentAbsen || session.parentAbsen || '');
-  if (!absen) return null;
-  return findStudentByKelasAbsen(kelas, absen);
-}
-
-function remapParentAccountsForClassV5(kelas, nextStudents, absenMap){
-  let changed = false;
-  const nextByNik = new Map(nextStudents.map(s => [normalizeNik(s.NIK), s]));
-  accountsDB = (accountsDB || []).map(acc => {
-    if (acc.role !== 'orangtua' || normalizeClassName(acc.kelas) !== kelas) return acc;
-    let target = null;
-    const parentNik = normalizeNik(acc.parentStudentNik || '');
-    if (parentNik && nextByNik.has(parentNik)) {
-      target = nextByNik.get(parentNik);
-    } else if (acc.parentAbsen) {
-      target = absenMap.get(normalizeAbsen(acc.parentAbsen)) || null;
-    }
-    if (!target) return acc;
-    const nextAbsen = normalizeAbsen(target.Absen);
-    const nextNik = normalizeNik(target.NIK) || null;
-    if (normalizeAbsen(acc.parentAbsen) === nextAbsen && normalizeNik(acc.parentStudentNik || '') === (nextNik || '')) return acc;
-    changed = true;
-    return { ...acc, parentAbsen: nextAbsen, parentStudentNik: nextNik };
-  });
-  if (changed) {
-    accountRepairDirtyV5 = true;
-    saveAccountsCache();
-  }
-  return changed;
-}
-
-function remapDailyEventsForClassV5(kelas, absenMap){
-  const daily = getDailyEvents();
-  let changed = false;
-  ['dispen', 'pulangCepat', 'terlambat'].forEach(bucket => {
-    const nextBucket = {};
-    Object.entries(daily[bucket] || {}).forEach(([key, value]) => {
-      if (!key.startsWith(`${kelas}#`)) {
-        nextBucket[key] = value;
-        return;
-      }
-      const oldAbsen = normalizeAbsen(key.split('#').pop());
-      const mapped = absenMap.get(oldAbsen);
-      const nextKey = mapped ? studentKey(kelas, mapped.Absen) : key;
-      nextBucket[nextKey] = value;
-      if (nextKey !== key) changed = true;
-    });
-    daily[bucket] = nextBucket;
-  });
-  if (changed) saveDailyEvents(daily);
-  return changed;
-}
-
-function remapTeacherSessionsForClassV5(kelas, absenMap){
-  let changed = false;
-  const changedSessions = [];
-  teacherAttendanceDB = (teacherAttendanceDB || []).map(sess => {
-    if (normalizeClassName(sess?.kelas) !== kelas || !sess?.records) return sess;
-    const nextRecords = {};
-    let sessionChanged = false;
-    Object.entries(sess.records || {}).forEach(([key, rec]) => {
-      const oldAbsen = normalizeAbsen(rec?.Absen || key);
-      const mapped = absenMap.get(oldAbsen);
-      const nextAbsen = mapped ? normalizeAbsen(mapped.Absen) : oldAbsen;
-      const nextRec = { ...rec, Absen: nextAbsen };
-      if (mapped?.NIK) nextRec.NIK = mapped.NIK;
-      nextRecords[nextAbsen] = nextRec;
-      if (nextAbsen !== oldAbsen || normalizeNik(rec?.NIK || '') !== normalizeNik(nextRec.NIK || '')) sessionChanged = true;
-    });
-    if (!sessionChanged) return sess;
-    changed = true;
-    const updatedSess = { ...sess, records: nextRecords };
-    changedSessions.push(updatedSess);
-    return updatedSess;
-  });
-  if (changed) {
-    saveTeacherAttendanceCache();
-    changedSessions.forEach(sess => upsertTeacherSessionToFirestore(sess).catch(console.error));
-  }
-  return changed;
-}
-
-function resequenceClassAlphabetical(kelas){
-  const kelasFix = normalizeClassName(kelas);
-  ensureBuckets();
-  const original = (localDB[kelasFix] || []).map(s => normalizeStudentRow({ ...s, Kelas: kelasFix }));
-  if (!original.length) {
-    localDB[kelasFix] = [];
-    return false;
-  }
-  const sorted = sortStudentsAlpha(original);
-  const nextStudents = sorted.map((student, idx) => normalizeStudentRow({ ...student, Kelas: kelasFix, Absen: normalizeAbsen(idx + 1) }));
-  const beforeSig = original.map(s => `${studentIdentityKeyV5(s)}|${normalizeAbsen(s.Absen)}|${String(s.Nama || '').trim()}`).join('||');
-  const afterSig = nextStudents.map(s => `${studentIdentityKeyV5(s)}|${normalizeAbsen(s.Absen)}|${String(s.Nama || '').trim()}`).join('||');
-  const changed = beforeSig !== afterSig;
-  const absenMap = new Map();
-  sorted.forEach((student, idx) => {
-    absenMap.set(normalizeAbsen(student.Absen), nextStudents[idx]);
-  });
-  localDB[kelasFix] = nextStudents;
-  if (!changed) return false;
-  remapDailyEventsForClassV5(kelasFix, absenMap);
-  remapTeacherSessionsForClassV5(kelasFix, absenMap);
-  remapParentAccountsForClassV5(kelasFix, nextStudents, absenMap);
-  return true;
-}
-
-function resequenceAllClasses(){
-  let changed = false;
-  classesSorted().forEach(kelas => {
-    if (resequenceClassAlphabetical(kelas)) changed = true;
-  });
-  saveCacheDB();
-  return changed;
-}
-
-async function flushAccountRepairV5(){
-  if (!accountRepairDirtyV5) return;
-  accountRepairDirtyV5 = false;
-  try {
-    await saveAccountsToFirestore();
-  } catch (e) {
-    console.error('Gagal sinkron akun parent V5:', e);
-    accountRepairDirtyV5 = true;
-  }
-}
-
-const __v5SyncClassBase = syncClassToFirestore;
-syncClassToFirestore = async function(kelas){
-  resequenceClassAlphabetical(kelas);
-  saveCacheDB();
-  await __v5SyncClassBase(kelas);
-  await flushAccountRepairV5();
-};
-
-const __v5SubscribeToKelasBase = subscribeToKelas;
-subscribeToKelas = async function(kelas){
-  if (!kelas) return;
-  const db = firebase.firestore();
-  if (unsubscribers[kelas]) {
-    try { unsubscribers[kelas](); } catch {}
-  }
-  unsubscribers[kelas] = db.collection('kelas').doc(kelas).collection('siswa')
-    .onSnapshot((snapshot) => {
-      localDB[kelas] = [];
-      snapshot.forEach(doc => {
-        localDB[kelas].push(normalizeStudentRow(doc.data()));
-      });
-      const changed = resequenceClassAlphabetical(kelas);
-      saveCacheDB();
-      renderAll();
-      checkParentStatusChange().catch(console.error);
-      if (changed) {
-        syncClassToFirestore(kelas).catch(console.error);
-      }
-    }, (error) => {
-      console.error(`Error subscribe kelas ${kelas}:`, error);
-    });
-};
-
-function lockedClassRequired(){
-  return session.role === 'guru' && session.isWaliKelas && activeRoleTab === 'view-wali';
-}
-
-function studentAlreadyScannedTodayV5(kelas, absen){
-  const student = findStudentByKelasAbsen(kelas, absen);
-  return !!(student && student.Tanggal === todayId() && student.Status && student.Status !== '-');
-}
-
-async function onScan(prefix, text){
-  const now = Date.now();
-  if (text === scanMemory[prefix].text && (now - scanMemory[prefix].at) < SCAN_COOLDOWN_MS) return;
-  scanMemory[prefix] = { text, at: now };
-
-  const payload = parsePayload(text);
-  if (!payload) return showFeedback(prefix, '❌', 'QR INVALID', 'FORMAT TIDAK SESUAI', 'bg-red-700');
-
-  const { nama, kelas, absen } = payload;
-
-  if (prefix === 'pelajaran') {
-    const active = currentOpenLessonSessionV4();
-    if (!active) return showFeedback(prefix, '❌', safeUpper(nama), 'MULAI ABSENSI KELAS DULU', 'bg-red-700');
-    if (active.kelas !== kelas) return showFeedback(prefix, '❌', safeUpper(nama), `KELAS AKTIF ${active.kelas}, QR ${kelas}`, 'bg-red-700');
-    const r = await markLessonAttendance({ kelas, absen, status: 'HADIR', source: 'SCAN QR' });
-    if (!r.ok) return showFeedback(prefix, '❌', safeUpper(nama), r.msg, 'bg-red-700');
-    showFeedback(prefix, '✅', safeUpper(r.student.Nama), `PELAJARAN HADIR • ${kelas} • ABSEN ${normalizeAbsen(r.student.Absen)}`, 'bg-green-700');
-    renderAll();
-    return;
-  }
-
-  if (lockedClassRequired() && kelas !== session.kelas) {
-    return showFeedback(prefix, '❌', safeUpper(nama), `KELAS TIDAK SESUAI (WAJIB ${session.kelas})`, 'bg-red-700');
-  }
-
-  if (studentAlreadyScannedTodayV5(kelas, absen)) {
-    const student = findStudentByKelasAbsen(kelas, absen);
-    const info = student ? `SUDAH ${student.Status || 'ABSEN'} • ${student.Jam || '-'}` : 'SUDAH ABSEN HARI INI';
-    return showFeedback(prefix, '⚠️', safeUpper(student?.Nama || nama), info, 'bg-amber-700');
-  }
-
-  const status = session.mode || 'HADIR';
-  const r = await markAttendance({ kelas, absen, status });
-  if (!r.ok) return showFeedback(prefix, '❌', safeUpper(nama), r.msg, 'bg-red-700');
-
-  const icon = status === 'HADIR' ? '✅' : status === 'IZIN' ? '📝' : status === 'SAKIT' ? '🤒' : '❌';
-  showFeedback(prefix, icon, safeUpper(r.student.Nama), `PRESENSI ${status} • ${kelas} • ABSEN ${normalizeAbsen(r.student.Absen)}`, 'bg-green-700');
-  renderAll();
-}
-
-function populateStudentClassSelects(){
-  const globalOptions = classesSorted();
-  ['student-kelas', 'admin-student-class-picker', 'piket-dp-kelas'].forEach(id => {
-    const el = $(id);
-    if (!el) return;
-    const current = normalizeClassTokenV4(el.value || '');
-    const placeholder = id === 'admin-student-class-picker' ? '' : 'Pilih kelas';
-    el.innerHTML = (id === 'admin-student-class-picker' ? '' : `<option value="">${placeholder}</option>`) + globalOptions.map(k => `<option value="${k}">${k}</option>`).join('');
-    if (current && globalOptions.includes(current)) el.value = current;
-    else if (id === 'admin-student-class-picker' && globalOptions[0]) el.value = globalOptions[0];
-  });
-
-  const lessonSelect = $('pelajaran-kelas');
-  if (lessonSelect) {
-    const allowed = availableClassesForTeacherV4();
-    const current = normalizeClassTokenV4(lessonSelect.value || '');
-    lessonSelect.innerHTML = '<option value="">Pilih kelas...</option>' + allowed.map(k => `<option value="${k}">${k}</option>`).join('');
-    if (current && allowed.includes(current)) lessonSelect.value = current;
-    else if (allowed[0]) lessonSelect.value = allowed[0];
-  }
-}
-
-async function saveAccountForm(){
-  if (session.role !== 'admin') return toast('Hanya admin yang bisa mengelola akun.');
-  const editIndex = $('acc-edit-index')?.value ?? '';
-  const role = String($('acc-role')?.value || '').trim();
-  const username = String($('acc-username')?.value || '').trim();
-  const password = String($('acc-password')?.value || '').trim();
-  const displayName = String($('acc-name')?.value || '').trim();
-  const kelas = normalizeClassTokenV4($('acc-kelas')?.value || '');
-  const parentAbsen = String($('acc-absen')?.value || '').trim();
-  const parentPhone = String($('acc-hp')?.value || '').trim();
-  const nip = String($('acc-guru-nip')?.value || '').trim();
-  const mengajar = selectedMengajarClassesV4();
-  const isWaliKelas = !!$('acc-is-wali')?.checked;
-  const waliKelas = selectedWaliClassV4();
-  const allClasses = classesSorted();
-  if (!['admin', 'guru', 'orangtua'].includes(role)) return toast('Role akun tidak valid.');
-  if (!username || !password || !displayName) return toast('Nama, username, dan password wajib diisi.');
-  if (role === 'guru' && !nip) return toast('NIP guru wajib diisi.');
-  if (role === 'guru' && !mengajar.length) return toast('Pilih minimal 1 kelas pada bagian Mengajar.');
-  if (role === 'guru' && mengajar.some(k => !allClasses.includes(k))) return toast('Ada kelas mengajar yang tidak tersedia di tab Kelas.');
-  if (role === 'guru' && isWaliKelas && !waliKelas) return toast('Pilih kelas wali dari tombol yang tersedia.');
-  if (role === 'guru' && waliKelas && !allClasses.includes(waliKelas)) return toast('Kelas wali tidak valid.');
-  if (role === 'guru' && isWaliKelas) {
-    const currentUsername = editIndex !== '' ? (accountsDB[Number(editIndex)]?.username || '') : '';
-    if (assignedWaliClassesV4(currentUsername).has(waliKelas)) return toast(`Kelas ${waliKelas} sudah dipakai wali kelas lain.`);
-  }
-  if (role === 'orangtua' && (!kelas || !parentAbsen)) return toast('Kelas dan no absen anak wajib diisi.');
-  if (role === 'orangtua' && !allClasses.includes(kelas)) return toast('Kelas anak belum ada di tab Kelas.');
-  const duplicate = accountsDB.findIndex(a => a.username.toLowerCase() === username.toLowerCase());
-  if (duplicate >= 0 && String(duplicate) !== String(editIndex)) return toast('Username sudah dipakai.');
-  const targetStudent = role === 'orangtua' ? findStudentByKelasAbsen(kelas, parentAbsen) : null;
-  const account = applyAccountRules({ username, password, role, displayName, kelas, parentAbsen, parentPhone, parentStudentNik: targetStudent?.NIK || null, nip, mengajar, isWaliKelas, waliKelas });
-  if (editIndex === '') accountsDB.push(account); else accountsDB[Number(editIndex)] = account;
-  if (!accountsDB.some(a => a.role === 'admin')) return toast('Minimal harus ada 1 akun admin.');
-  saveAccountsCache();
-  try {
-    setLoading(true, 'Menyimpan akun...');
-    await saveAccountsToFirestore();
-    resetAccountForm();
-    renderAll();
-    toast('Akun berhasil disimpan.');
-  } catch (e) {
-    toast('Gagal simpan akun: ' + e.message);
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function markLessonAttendance({ kelas, absen, status, source = 'MANUAL' }){
-  const active = currentOpenLessonSessionV4();
-  if (!active) return { ok: false, msg: 'Mulai absensi kelas dulu.' };
-  if (active.kelas !== kelas) return { ok: false, msg: `Absensi aktif untuk ${active.kelas}, bukan ${kelas}.` };
-  const student = (localDB[kelas] || []).find(s => normalizeAbsen(s.Absen) === normalizeAbsen(absen));
-  if (!student) return { ok: false, msg: 'Siswa tidak ditemukan.' };
-  active.records[normalizeAbsen(absen)] = {
-    Nama: student.Nama,
-    Kelas: student.Kelas,
-    Absen: normalizeAbsen(student.Absen),
-    NIK: student.NIK || null,
-    JK: student.JK || '-',
-    Agama: student.Agama || '-',
-    Status: status || 'HADIR',
-    Jam: nowTimeId(),
-    Tanggal: active.date,
-    Guru: active.teacherName,
-    Sumber: source
-  };
-  saveTeacherAttendanceCache();
-  upsertTeacherSessionToFirestore(active);
-  return { ok: true, student, msg: 'OK' };
-}
-
-async function buildQrZipForStudents(students, zipBaseName = 'QR_SISWA_BULK'){
-  if (!students.length) return null;
-  const zip = new JSZip();
-  const engine = $('hidden-qr-engine');
-  setLoading(true, 'Membuat QR massal...');
-  try {
-    for (let i = 0; i < students.length; i++) {
-      const base = normalizeStudentRow(students[i]);
-      const resolved = normalizeNik(base.NIK) ? (findStudentByNik(base.NIK) || base) : base;
-      const s = normalizeStudentRow(resolved);
-      const tmpId = `bulk-student-v5-${Date.now()}-${i}`;
-      engine.innerHTML = `
-        <div id="${tmpId}" style="padding:40px;background:white;width:360px;text-align:center;border-radius:28px;">
-          <div id="${tmpId}-qr" style="display:flex;justify-content:center;"></div>
-          <div style="margin-top:18px;">
-            <b style="color:black;font-size:22px;text-transform:uppercase;display:block;">${safeUpper(s.Nama)}</b>
-            <p style="color:#666;font-weight:700;font-size:12px;text-transform:uppercase;margin-top:6px;">${s.Kelas} • ABSEN ${s.Absen} • ${s.JK} • ${s.Agama} • NIK ${s.NIK || '-'}</p>
-          </div>
-        </div>
-      `;
-      const qrBox = document.getElementById(`${tmpId}-qr`);
-      qrBox.innerHTML = '';
-      new QRCode(qrBox, { text: makeQrPayload({ nik: s.NIK, nama: s.Nama, kelas: s.Kelas, absen: s.Absen, jk: s.JK, agama: s.Agama }), width: 250, height: 250, correctLevel: QRCode.CorrectLevel.M });
-      await waitForQrRendered(qrBox);
-      await waitForNextPaint(1);
-      const cardEl = document.getElementById(tmpId);
-      const canvas = await html2canvas(cardEl, { scale: 1.5 });
-      const b64 = canvas.toDataURL('image/png').split(',')[1];
-      const safeName = String(s.Nama || 'SISWA').replace(/[\/:*?"<>|]/g, '-').slice(0, 60);
-      const safeNik = normalizeNik(s.NIK) || 'NO-NIK';
-      zip.file(`${s.Kelas}/QR_${String(s.Absen).padStart(2, '0')}_${safeName}_${safeNik}.png`, b64, { base64: true });
-      setText('loading-text', `Membuat QR... (${i + 1}/${students.length})`);
-    }
-    return await zip.generateAsync({ type: 'blob' });
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function exportStudentExcel(){
-  const zip = new JSZip();
-  let count = 0;
-  classesSorted().forEach(k => {
-    const arr = (localDB[k] || []).slice().sort((a, b) => Number(a.Absen) - Number(b.Absen));
-    if (!arr.length) return;
-    const rows = arr.map(s => ({
-      Absen: Number(String(s.Absen || '0').replace(/^0+/, '') || '0'),
-      NIK: s.NIK || '',
-      NISN: s.NISN || '',
-      NIS: s.NIS || '',
-      Nama: s.Nama || '',
-      Kelas: s.Kelas || k,
-      Jenis: s.Jenis || s.JK || '',
-      Agama: s.Agama || ''
-    }));
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, k.replace('-', ''));
-    const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    zip.file(`DATA_SISWA_${k}.xlsx`, out);
-    count++;
-  });
-  if (!count) return toast('Belum ada data siswa.');
-  const blob = await zip.generateAsync({ type: 'blob' });
-  downloadBlobFile(blob, `DATA_SISWA_PER_KELAS_${todayId().replace(/\//g, '-')}.zip`);
-}
-
-const __v5InitBase = init;
-init = async function(){
-  await __v5InitBase();
-  resequenceAllClasses();
-  await flushAccountRepairV5();
-  renderAll();
-};
-window.onload = init;
-
-/* =========================================================
-   PATCH PRODUKSI ABSENSI - 2026-04-26
-   Patch bersih untuk menstabilkan core absensi QR:
-   - tanggal Firestore aman: yyyy-mm-dd
-   - scan tidak rewrite/delete satu kelas penuh
-   - anti double-scan via attendance/{date}/records/{id}
-   - validasi jam sebelum mutasi data lokal
-   - sync dispen/pulang/terlambat granular per siswa
-   - parser import aman untuk kelas X-1/XI-1/XII-1
-   ========================================================= */
+ 
 
 const PATCH_ABSENSI_VERSION = '2026-04-26-production-stability';
 
@@ -5984,18 +4365,6 @@ dailyKeyForDate = function(tanggal){
 
 dailyKey = function(){
   return dailyKeyForDate(todayId());
-};
-
-const PATCH_baseNormalizeStudentRow = normalizeStudentRow;
-normalizeStudentRow = function(row){
-  const out = PATCH_baseNormalizeStudentRow(row || {});
-  out.Tanggal = patchNormalizeDateId(out.Tanggal) || '-';
-  out.Jam = out.Jam && out.Jam !== '-' ? String(out.Jam).replace(/\./g, ':') : '-';
-  out.JamTerlambat = out.JamTerlambat && out.JamTerlambat !== '-' ? String(out.JamTerlambat).replace(/\./g, ':') : '-';
-  ['Hadir', 'Sakit', 'Izin', 'Alpa', 'Terlambat', 'Dispen', 'PulangCepat'].forEach(key => {
-    out[key] = Number(out[key] || 0);
-  });
-  return out;
 };
 
 function patchSafeFirestoreDocId(value){
@@ -6568,13 +4937,5 @@ function patchMigrateLegacyDailyEventsStorage(){
   }
 }
 
-const PATCH_baseInit = init;
-init = async function(){
-  patchMigrateLegacyDailyEventsStorage();
-  await PATCH_baseInit();
-  patchMigrateLegacyDailyEventsStorage();
-  migrateStudentsSchema();
-  saveCacheDB();
-  renderAll();
-};
+
 window.onload = init;
