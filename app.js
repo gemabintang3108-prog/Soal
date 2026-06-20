@@ -611,14 +611,14 @@ function groupedTeacherLessonRows(username, dateId = null){
   return grouped;
 }
 
-async function exportTeacherLessonZip(kind = "daily", customDate = null){
-  if (!teacherCanUsePelajaran()) return toast("Akses tab pelajaran ditolak.", 'error');
+async function exportTeacherLessonZip(kind = "daily"){
+  if (!teacherCanUsePelajaran()) return toast("Akses tab pelajaran ditolak.");
   const zip = new JSZip();
-  const dateId = customDate || teacherLessonDateId();
+  const dateId = teacherLessonDateId();
   const grouped = groupedTeacherLessonRows(session.username, kind === "daily" ? dateId : null);
   const kelasList = Object.keys(grouped).sort();
-  if (!kelasList.length) return toast(kind === "daily" ? `Belum ada absensi pelajaran tanggal ${dateId}.` : "Belum ada rekap absensi pelajaran.", 'warning');
-  setLoading(true, kind === "daily" ? "Membuat ZIP pelajaran..." : "Membuat ZIP rekap pelajaran...");
+  if (!kelasList.length) return toast(kind === "daily" ? "Belum ada absensi pelajaran hari ini." : "Belum ada rekap absensi pelajaran.");
+  setLoading(true, kind === "daily" ? "Membuat ZIP pelajaran harian..." : "Membuat ZIP rekap pelajaran...");
   try {
     kelasList.forEach(kelas => {
       const wb = XLSX.utils.book_new();
@@ -630,13 +630,12 @@ async function exportTeacherLessonZip(kind = "daily", customDate = null){
     });
     const blob = await zip.generateAsync({ type: "blob" });
     const safeName = (session.displayName || session.username || "guru").replace(/[^a-z0-9_-]+/ig, "-");
-    const dateStr = dateId.replace(/\//g, "-");
-    const fileName = kind === "daily" ? `PELAJARAN_HARIAN_${safeName}_${dateStr}.zip` : `PELAJARAN_REKAP_${safeName}.zip`;
+    const fileName = kind === "daily" ? `PELAJARAN_HARIAN_${safeName}_${dateId.replace(/\//g, "-")}.zip` : `PELAJARAN_REKAP_${safeName}.zip`;
     downloadBlobFile(blob, fileName);
     toast(`ZIP ${kind === "daily" ? "harian" : "rekap"} berhasil dibuat.`);
   } catch(e){
     console.error(e);
-    toast("Gagal export pelajaran: " + e.message, 'error');
+    toast("Gagal export pelajaran: " + e.message);
   } finally { setLoading(false); }
 }
 
@@ -739,16 +738,7 @@ function $(id){ return document.getElementById(id); }
 function show(id){ $(id)?.classList.remove("hidden"); }
 function hide(id){ $(id)?.classList.add("hidden"); }
 function setText(id, t){ const el = $(id); if(el) el.textContent = t; }
-function toast(msg, type = 'success'){ 
-  const container = document.getElementById('toast-container');
-  if (!container) { alert(msg); return; }
-  const el = document.createElement('div');
-  el.className = `toast-msg toast-${type}`;
-  const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
-  el.innerHTML = `<span>${icons[type] || 'ℹ️'}</span><span>${String(msg).replace(/</g,'&lt;')}</span>`;
-  container.appendChild(el);
-  setTimeout(() => { el.style.animation = 'toastOut .3s ease forwards'; setTimeout(() => el.remove(), 300); }, 3500);
-}
+function toast(msg){ alert(msg); }
 
 function setLoading(on, text){
   const ov = $("loading-overlay");
@@ -852,40 +842,6 @@ function parsePayload(text){
     nik: null,
     student: null
   };
-}
-
-/* ===================== DATE PICKER ===================== */
-let dpCallback = null;
-let dpMode = 'single';
-
-function dateToId(d){
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function openDatePicker(title, callback, mode = 'single'){
-  dpCallback = callback;
-  dpMode = mode;
-  document.getElementById('dp-subtitle').textContent = title || 'Pilih tanggal untuk export data';
-  const dp = document.getElementById('dp-date');
-  dp.value = dateToId(new Date());
-  dp.type = mode === 'range' ? 'date' : 'date';
-  document.getElementById('modal-datepicker').classList.remove('hidden');
-  document.getElementById('modal-datepicker').classList.add('flex');
-}
-
-function closeDatePicker(){
-  document.getElementById('modal-datepicker').classList.add('hidden');
-  document.getElementById('modal-datepicker').classList.remove('flex');
-  dpCallback = null;
-}
-
-function getDatePickerValue(){
-  const dp = document.getElementById('dp-date');
-  if (!dp || !dp.value) return dateToId(new Date());
-  return dp.value;
 }
 
 function saveSession(){
@@ -1242,7 +1198,7 @@ async function checkParentStatusChange() {
     if (!isParentNotifEnabled()) return;
     const student = getParentStudent();
     if (!student) return;
-  const daily = getDailyEventsForDate(dateId);
+    const daily = getDailyEvents();
     const currentKey = buildParentStatusKey(student, daily);
     if (!lastParentStatusKey) {
       lastParentStatusKey = currentKey;
@@ -2697,43 +2653,45 @@ function downloadBlobFile(blob, filename){
 }
 
 // ===== EXPORT HARIAN (ZIP UNTUK ADMIN/PIKET, EXCEL UNTUK WALI) =====
-function exportDaily(scope, kelasLocked = null, customDate = null){
-  setLoading(true, "Menyiapkan laporan...");
+function exportDaily(scope, kelasLocked = null){
+  setLoading(true, "Menyiapkan laporan harian...");
   try {
-    const tanggal = customDate || todayId();
-    const rows = rowsForDate(tanggal, scope, kelasLocked);
+    const today = todayId();
+    console.log("📅 Export Daily - Tanggal:", today);
+    
+    const rows = rowsForDate(today, scope, kelasLocked);
+    console.log("📊 Data rows:", rows);
     
     if (rows.length === 0) {
-      toast(`Tidak ada data presensi untuk tanggal ${tanggal}!`, 'warning');
+      toast("Tidak ada data presensi untuk hari ini!");
       setLoading(false);
       return;
     }
     
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, `HARIAN ${tanggal}`);
+    XLSX.utils.book_append_sheet(wb, ws, `HARIAN ${today}`);
     
     const arr = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    const dateStr = tanggal.replace(/\//g, "-");
     const filename = scope === "class" 
-      ? `LAPORAN_HARIAN_${kelasLocked}_${dateStr}.xlsx`
-      : `LAPORAN_HARIAN_ALL_${dateStr}.xlsx`;
+      ? `LAPORAN_HARIAN_${kelasLocked}_${today.replace(/\//g, "-")}.xlsx`
+      : `LAPORAN_HARIAN_ALL_${today.replace(/\//g, "-")}.xlsx`;
     
     downloadBlobFile(new Blob([arr]), filename);
-    toast(`✅ Export harian ${tanggal} berhasil!`);
+    toast("✅ Export harian berhasil!");
   } catch (e) {
-    console.error("Gagal export daily:", e);
-    toast("Gagal export: " + e.message, 'error');
+    console.error("❌ Gagal export daily:", e);
+    toast("Gagal export: " + e.message);
   } finally {
     setLoading(false);
   }
 }
 
-async function exportDailyZip(scope, kelasLocked = null, customDate = null) {
-  setLoading(true, "Membuat ZIP laporan...");
+async function exportDailyZip(scope, kelasLocked = null) {
+  setLoading(true, "Membuat ZIP laporan harian...");
   try {
     const zip = new JSZip();
-    const tanggal = customDate || todayId();
+    const today = todayId();
     
     let kelasList = [];
     if (scope === "class" && kelasLocked) {
@@ -2745,7 +2703,8 @@ async function exportDailyZip(scope, kelasLocked = null, customDate = null) {
     let totalFiles = 0;
     
     for (const kelas of kelasList) {
-      const rows = rowsForDate(tanggal, "class", kelas);
+      const rows = rowsForDate(today, "class", kelas);
+      console.log(`Kelas ${kelas}: ${rows.length} data`);
       
       if (rows.length > 0) {
         const wb = XLSX.utils.book_new();
@@ -2753,28 +2712,27 @@ async function exportDailyZip(scope, kelasLocked = null, customDate = null) {
         XLSX.utils.book_append_sheet(wb, ws, `HARIAN ${kelas}`);
         
         const arr = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-        zip.file(`${kelas}/LAPORAN_HARIAN_${kelas}_${tanggal.replace(/\//g, "-")}.xlsx`, arr);
+        zip.file(`${kelas}/LAPORAN_HARIAN_${kelas}_${today.replace(/\//g, "-")}.xlsx`, arr);
         totalFiles++;
       }
     }
     
     if (totalFiles === 0) {
-      toast(`Tidak ada data presensi untuk tanggal ${tanggal}!`, 'warning');
+      toast("Tidak ada data presensi hari ini!");
       setLoading(false);
       return;
     }
     
     const content = await zip.generateAsync({ type: "blob" });
-    const dateStr = tanggal.replace(/\//g, "-");
     const filename = scope === "class" 
-      ? `LAPORAN_HARIAN_${kelasLocked}_${dateStr}.zip`
-      : `LAPORAN_HARIAN_ALL_${dateStr}.zip`;
+      ? `LAPORAN_HARIAN_${kelasLocked}_${today.replace(/\//g, "-")}.zip`
+      : `LAPORAN_HARIAN_ALL_${today.replace(/\//g, "-")}.zip`;
     
     downloadBlobFile(content, filename);
-    toast(`✅ ZIP berhasil (${totalFiles} kelas, ${tanggal})`);
+    toast(`✅ ZIP berhasil dibuat (${totalFiles} kelas)!`);
   } catch (e) {
-    console.error("Gagal buat ZIP:", e);
-    toast("Gagal buat ZIP: " + e.message, 'error');
+    console.error("❌ Gagal buat ZIP:", e);
+    toast("Gagal buat ZIP: " + e.message);
   } finally {
     setLoading(false);
   }
@@ -3437,9 +3395,7 @@ function bindEvents(){
   $("btn-pelajaran-start-session")?.addEventListener("click", startLessonSession);
   $("pelajaran-kelas")?.addEventListener("change", renderAll);
   $("pelajaran-search")?.addEventListener("input", renderAll);
-  $("btn-pelajaran-export-daily")?.addEventListener("click", () => {
-    openDatePicker('Pilih tanggal export pelajaran', (date) => exportTeacherLessonZip("daily", date));
-  });
+  $("btn-pelajaran-export-daily")?.addEventListener("click", () => exportTeacherLessonZip("daily"));
   $("btn-pelajaran-export-rekap")?.addEventListener("click", () => exportTeacherLessonZip("rekap"));
 
   document.querySelectorAll(".mode-pill").forEach(btn => {
@@ -3475,24 +3431,18 @@ function bindEvents(){
   $("btn-save-settings")?.addEventListener("click", saveSettingsToFirestore);
   $("btn-admin-sync")?.addEventListener("click", syncAllToFirestore);
 
-  // EXPORT UNTUK ADMIN/PIKET - HARIAN dengan date picker
-$("btn-export-daily-all")?.addEventListener("click", () => {
-  openDatePicker('Pilih tanggal export harian (semua kelas)', (date) => exportDailyZip("all", null, date));
-});
+  // EXPORT UNTUK ADMIN/PIKET
+$("btn-export-daily-all")?.addEventListener("click", () => exportDailyZip("all"));
 $("btn-export-alltime")?.addEventListener("click", exportTotalAllZip);
 
-// EXPORT UNTUK WALI KELAS - HARIAN dengan date picker
+// EXPORT UNTUK WALI KELAS
 $("btn-wali-export-daily")?.addEventListener("click", () => { 
-  if (session.kelas) {
-    openDatePicker(`Pilih tanggal export harian (${session.kelas})`, (date) => exportDaily("class", session.kelas, date));
-  }
+  if (session.kelas) exportDaily("class", session.kelas); 
 });
 $("btn-wali-export-alltime")?.addEventListener("click", exportTotalWali);
 
-// EXPORT UNTUK PIKET - HARIAN dengan date picker
-$("btn-piket-export-daily")?.addEventListener("click", () => {
-  openDatePicker('Pilih tanggal export harian (semua kelas)', (date) => exportDailyZip("all", null, date));
-});
+// EXPORT UNTUK PIKET (sama kayak admin)
+$("btn-piket-export-daily")?.addEventListener("click", () => exportDailyZip("all"));
 $("btn-piket-export-alltime")?.addEventListener("click", exportTotalAllZip);
 
   // TOMBOL RESET
@@ -3567,29 +3517,6 @@ $("btn-piket-export-alltime")?.addEventListener("click", exportTotalAllZip);
   });
 
   $("btn-piket-dp-refresh")?.addEventListener("click", renderPiketDispenPending);
-
-  // DATE PICKER BUTTONS
-  $("dp-confirm")?.addEventListener("click", () => {
-    const date = getDatePickerValue();
-    if (dpCallback) dpCallback(date);
-    closeDatePicker();
-  });
-  $("dp-cancel")?.addEventListener("click", closeDatePicker);
-  $("dp-today")?.addEventListener("click", () => {
-    document.getElementById('dp-date').value = dateToId(new Date());
-  });
-  $("dp-yesterday")?.addEventListener("click", () => {
-    const d = new Date(); d.setDate(d.getDate() - 1);
-    document.getElementById('dp-date').value = dateToId(d);
-  });
-  $("dp-thisweek")?.addEventListener("click", () => {
-    const d = new Date(); d.setDate(d.getDate() - d.getDay());
-    document.getElementById('dp-date').value = dateToId(d);
-  });
-  $("dp-thismonth")?.addEventListener("click", () => {
-    const d = new Date(); d.setDate(1);
-    document.getElementById('dp-date').value = dateToId(d);
-  });
 
   $("ma-close")?.addEventListener("click", closeActionModal);
   $("ma-reset")?.addEventListener("click", resetActionModalInputs);
