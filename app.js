@@ -1654,22 +1654,27 @@ function setBadge(){
 
 function getAvailableRoleTabs(){
   if (!session.role) return [];
-  const tabs = [];
+  
   if (session.role === "admin") {
-    tabs.push({ id: "view-admin", label: "Admin" });
-    tabs.push({ id: "view-piket", label: "Piket" });
-    return tabs;
+    return [
+      { id: "view-admin", label: "Admin" },
+      { id: "view-admin-accounts", label: "Akun Guru" },
+      { id: "view-admin-students", label: "Data Siswa" },
+      { id: "view-admin-classes", label: "Atur Kelas" },
+      { id: "view-admin-schedule", label: "Jadwal Piket" },
+      { id: "view-admin-settings", label: "Pengaturan" },
+      { id: "view-piket", label: "Piket" }
+    ];
   }
+
+  const tabs = [];
   if (session.role === "guru") {
     tabs.push({ id: "view-profile", label: "Profile" });
     tabs.push({ id: "view-pelajaran", label: "Pelajaran" });
     if (session.isWaliKelas) tabs.push({ id: "view-wali", label: "Wali Kelas" });
     if (session.piketToday) tabs.push({ id: "view-piket", label: "Piket" });
-    return tabs;
-  }
-  if (session.role === "orangtua") {
+  } else if (session.role === "orangtua") {
     tabs.push({ id: "view-ortu", label: "Orang Tua" });
-    return tabs;
   }
   return tabs;
 }
